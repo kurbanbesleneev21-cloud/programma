@@ -78,6 +78,10 @@ CREATE TABLE IF NOT EXISTS events (
   at   BIGINT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_events ON events(kind, key, at);
+CREATE TABLE IF NOT EXISTS counters (
+  key TEXT PRIMARY KEY,
+  n   BIGINT NOT NULL DEFAULT 0
+);
 CREATE TABLE IF NOT EXISTS used_tokens (
   nonce TEXT PRIMARY KEY,
   at    BIGINT NOT NULL
@@ -130,9 +134,17 @@ async function createPostgresStore(connectionString) {
     connectionTimeoutMillis: 10_000,
     ssl,
   });
+  // An idle client dropped by the server (pooler restart, paused project) must not crash the function.
+  pool.on('error', (err) => console.error('[db] idle client error:', err.message));
   // Serialise schema creation (several serverless instances may cold-start at once).
   // A transaction-scoped lock is safe behind Supabase's transaction-mode pooler.
-  const client = await pool.connect();
+  let client;
+  try {
+    client = await pool.connect();
+  } catch (err) {
+    await pool.end().catch(() => {});
+    throw err;
+  }
   try {
     await client.query('BEGIN');
     await client.query('SELECT pg_advisory_xact_lock(7240117)');
@@ -140,10 +152,11 @@ async function createPostgresStore(connectionString) {
     await client.query('COMMIT');
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
-    throw err;
-  } finally {
     client.release();
+    await pool.end().catch(() => {});
+    throw err;
   }
+  client.release();
 
   function buildWhere({ q, status, service, budget }) {
     const clauses = [];
@@ -294,6 +307,21 @@ async function createPostgresStore(connectionString) {
       return rows[0] ? { ...rows[0], id: Number(rows[0].id), created_at: iso(rows[0].created_at) } : null;
     },
     async deleteMedia(id) { await pool.query('DELETE FROM media WHERE id = $1', [id]); },
+
+    async deleteOrder(id) {
+      const files = (await pool.query('SELECT stored_name FROM order_files WHERE order_id = $1', [id])).rows.map((r) => r.stored_name);
+      const { rowCount } = await pool.query('DELETE FROM orders WHERE id = $1', [id]);
+      return rowCount ? files : null;
+    },
+
+    async bumpCounter(key, by = 1) {
+      await pool.query('INSERT INTO counters (key, n) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET n = counters.n + EXCLUDED.n', [key, by]);
+    },
+    async getCounters(keys) {
+      if (!keys.length) return {};
+      const { rows } = await pool.query('SELECT key, n FROM counters WHERE key = ANY($1)', [keys]);
+      return Object.fromEntries(rows.map((r) => [r.key, Number(r.n)]));
+    },
 
     async addEvent(kind, key) {
       await pool.query('INSERT INTO events (kind, key, at) VALUES ($1, $2, $3)', [kind, key, Date.now()]);

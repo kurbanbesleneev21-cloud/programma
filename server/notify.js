@@ -2,9 +2,9 @@
 
 const config = require('./config');
 const { SERVICES, BUDGETS, DEADLINES, CONTACT_METHODS } = require('./constants');
+const telegram = require('./telegram');
 
 const escHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const cut = (s, n) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
 function summary(order) {
   return {
@@ -13,41 +13,6 @@ function summary(order) {
     deadline: DEADLINES[order.deadline],
     contact: CONTACT_METHODS[order.contact_method],
   };
-}
-
-async function sendTelegram(order, filesCount, ctx) {
-  const token = config.telegram.token;
-  const chatId = ctx.settings.telegramChatId || config.telegram.chatId;
-  if (!token || !chatId) return { skipped: true };
-  const s = summary(order);
-  const lines = [
-    `<b>🆕 Новая заявка ${escHtml(order.number)}</b>`,
-    '',
-    `<b>Проект:</b> ${escHtml(order.project_name)}`,
-    `<b>Услуги:</b> ${escHtml(s.services)}`,
-    `<b>Бюджет:</b> ${escHtml(s.budget)}`,
-    `<b>Сроки:</b> ${escHtml(s.deadline)}`,
-    '',
-    `<b>Клиент:</b> ${escHtml(order.name)}`,
-    `<b>Email:</b> ${escHtml(order.email)}`,
-    `<b>Телефон:</b> ${escHtml(order.phone)}`,
-    order.telegram ? `<b>Telegram:</b> @${escHtml(order.telegram)}` : null,
-    `<b>Связь:</b> ${escHtml(s.contact)}`,
-    filesCount ? `<b>Файлов:</b> ${filesCount}` : null,
-    '',
-    escHtml(cut(order.description, 700)),
-    '',
-    `<a href="${escHtml(ctx.origin)}/admin/#/orders/${order.id}">Открыть в админ-панели</a>`,
-  ].filter((l) => l !== null);
-
-  const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: chatId, text: lines.join('\n'), parse_mode: 'HTML', disable_web_page_preview: true }),
-    signal: AbortSignal.timeout(8000),
-  });
-  if (!res.ok) throw new Error(`Telegram API ${res.status}: ${await res.text()}`);
-  return { sent: true };
 }
 
 let transporter;
@@ -124,9 +89,9 @@ async function sendEmails(order, filesCount, ctx) {
 }
 
 // Notification failures are logged but never fail the client's submission.
-async function notifyNewOrder(order, filesCount, { origin, settings }, log = console) {
+async function notifyNewOrder(order, filesCount, { origin, settings, store }, log = console) {
   const ctx = { origin, settings: settings || {} };
-  const [tg, mail] = await Promise.allSettled([sendTelegram(order, filesCount, ctx), sendEmails(order, filesCount, ctx)]);
+  const [tg, mail] = await Promise.allSettled([telegram.notifyOrder(store, order, filesCount, origin, ctx.settings.telegramChatId), sendEmails(order, filesCount, ctx)]);
   if (tg.status === 'rejected') log.error(`[notify] telegram failed for ${order.number}:`, tg.reason.message);
   if (mail.status === 'rejected') log.error(`[notify] email failed for ${order.number}:`, mail.reason.message);
 }

@@ -5,20 +5,30 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const config = require('./config');
-const { esc, safeUrl, head, nav, footer, ARROW } = require('./views/partials');
+const { esc, safeUrl, head, bodyOpen, bodyClose, ARROW } = require('./views/partials');
 const { projectCard } = require('./views/home');
 
 function layout(c, { origin, title, description, canonical, body, ogImage, jsonLd, noindex = false }) {
   return `${head({ c, origin, title, description, canonical, ogImage, jsonLd, noindex })}
-<body>
-  <a class="skip-link" href="#main">Перейти к содержимому</a>
-  <canvas class="bg-particles" aria-hidden="true"></canvas>
-  <div class="cursor" aria-hidden="true"><span class="cursor__dot"></span><span class="cursor__ring"></span></div>
-${nav(c)}
+${bodyOpen(c)}
   <main id="main">
 ${body}
   </main>
-${footer(c)}
+${bodyClose(c)}`;
+}
+
+// Shown to visitors while maintenance mode is on (the admin panel keeps working).
+function maintenancePage(c, { origin }) {
+  const m = c.maintenance;
+  return `${head({ c, origin, title: `${m.title} — ${c.brand.name}`, description: m.text, canonical: '/', noindex: true })}
+<body data-bg="${esc(c.design.background === 'none' ? 'aurora' : c.design.background)}" data-fx="1" style="--c1:${c.design.color1};--c2:${c.design.color2};--c3:${c.design.color3}">
+  <div class="bgfx" aria-hidden="true"><div class="bgfx__aurora"><i></i><i></i><i></i></div><div class="bgfx__grid"></div><div class="bgfx__vignette"></div></div>
+  <main class="maintenance">
+    <span class="logo__mark" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M11 9 4 16l7 7M21 9l7 7-7 7M18 6l-4 20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+    <h1 class="page-title">${esc(m.title)}</h1>
+    <p class="page-lead">${esc(m.text)}</p>
+    <p class="maintenance__links">${c.contacts.email ? `<a class="btn btn--primary" href="mailto:${esc(c.contacts.email)}"><span>${esc(c.contacts.email)}</span></a>` : ''}${c.contacts.telegram ? `<a class="btn btn--ghost" href="https://t.me/${esc(encodeURIComponent(c.contacts.telegram))}" target="_blank" rel="noopener"><span>Telegram</span></a>` : ''}</p>
+  </main>
 </body>
 </html>`;
 }
@@ -77,4 +87,4 @@ function contentPage(c, name, opts) {
   return layout(c, { ...opts, title: opts.title.replaceAll('CODEFORGE', c.brand.name), body });
 }
 
-module.exports = { renderProjectPage, contentPage, layout };
+module.exports = { renderProjectPage, contentPage, layout, maintenancePage };

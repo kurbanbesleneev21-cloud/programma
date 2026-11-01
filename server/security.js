@@ -115,10 +115,11 @@ const SESSION_COOKIE = 'cf_admin';
 const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
 const revoked = new Map(); // sid -> expiry; logout revokes immediately
 
-function createSession(user) {
+// `m` records how the admin signed in ('password' | 'google'); `e` is the Google e-mail.
+function createSession(user, { method = 'password', email = '' } = {}) {
   const sid = b64url(crypto.randomBytes(18));
   const now = Date.now();
-  const payload = b64url(JSON.stringify({ u: user, sid, iat: now, exp: now + SESSION_TTL_MS }));
+  const payload = b64url(JSON.stringify({ u: user, sid, iat: now, exp: now + SESSION_TTL_MS, m: method, ...(email ? { e: email } : {}) }));
   return `${payload}.${hmac(`session:${payload}`)}`;
 }
 

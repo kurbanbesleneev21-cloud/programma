@@ -6,6 +6,12 @@
   const $$ = (s, r = document) => [...r.querySelectorAll(s)];
   const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const finePointer = matchMedia('(hover: hover) and (pointer: fine)').matches;
+  const body = document.body;
+  const fx = body.dataset.fx !== '0' && !reduceMotion;
+  const store = {
+    get: (k) => { try { return localStorage.getItem(k); } catch { return null; } },
+    set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* private mode */ } },
+  };
 
   window.CF = window.CF || {};
 
@@ -24,8 +30,96 @@
     }, 2600);
   };
 
+  /* ---------- Preloader ---------- */
+  const preloader = $('.preloader');
+  const hidePreloader = () => {
+    if (!preloader) return;
+    preloader.classList.add('is-done');
+    setTimeout(() => preloader.remove(), 900);
+  };
+  if (preloader) {
+    if (document.readyState === 'complete') setTimeout(hidePreloader, 250);
+    else addEventListener('load', () => setTimeout(hidePreloader, 250), { once: true });
+    setTimeout(hidePreloader, 3500); // never block the page on slow assets
+  }
+
   /* ---------- Hero entrance ---------- */
   requestAnimationFrame(() => document.documentElement.classList.add('is-loaded'));
+
+  /* ---------- Announcement bar (dismissible, remembered per text) ---------- */
+  const ann = $('.announce');
+  if (ann) {
+    const key = `cf-ann-${[...ann.textContent].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) | 0, 7)}`;
+    if (store.get(key)) { ann.remove(); body.classList.remove('has-announce'); }
+    $('[data-announce-close]', ann)?.addEventListener('click', () => { store.set(key, '1'); ann.remove(); body.classList.remove('has-announce'); });
+  }
+
+  /* ---------- Scroll-linked effects: progress bar, fixed hero fade, back-to-top ---------- */
+  const progress = $('.scroll-progress');
+  const heroEl = $('.hero');
+  const heroMedia = body.dataset.heroFixed === '1' ? $('.hero__media') : null;
+  const toTop = $('[data-to-top]');
+  let scrollTicking = false;
+  const onScrollFx = () => {
+    scrollTicking = false;
+    const y = scrollY;
+    if (progress) {
+      const max = document.documentElement.scrollHeight - innerHeight;
+      progress.style.setProperty('--p', max > 0 ? (y / max).toFixed(4) : '0');
+    }
+    if (heroMedia && heroEl) {
+      const h = heroEl.offsetHeight || innerHeight;
+      const o = Math.max(0, 1 - y / (h * 0.85));
+      heroMedia.style.opacity = o.toFixed(3);
+      heroMedia.classList.toggle('is-gone', o <= 0.001);
+    }
+    if (toTop) toTop.classList.toggle('is-visible', y > innerHeight * 0.9);
+  };
+  addEventListener('scroll', () => { if (!scrollTicking) { scrollTicking = true; requestAnimationFrame(onScrollFx); } }, { passive: true });
+  addEventListener('resize', onScrollFx);
+  onScrollFx();
+  toTop && toTop.addEventListener('click', () => scrollTo({ top: 0, behavior: reduceMotion ? 'auto' : 'smooth' }));
+
+  /* ---------- Floating contact buttons ---------- */
+  const fab = $('[data-fab]');
+  if (fab) {
+    const toggle = $('.fab__toggle', fab);
+    toggle.addEventListener('click', () => {
+      const open = !fab.hasAttribute('data-open');
+      fab.toggleAttribute('data-open', open);
+      toggle.setAttribute('aria-expanded', String(open));
+    });
+    document.addEventListener('click', (e) => { if (!fab.contains(e.target)) { fab.removeAttribute('data-open'); toggle.setAttribute('aria-expanded', 'false'); } });
+  }
+
+  /* ---------- Cookie notice ---------- */
+  const cookie = $('[data-cookie]');
+  if (cookie && !store.get('cf-cookie-ok')) {
+    cookie.hidden = false;
+    $('[data-cookie-ok]', cookie).addEventListener('click', () => { store.set('cf-cookie-ok', '1'); cookie.remove(); });
+  }
+
+  /* ---------- Background video: keep it playing (iOS pauses muted video sometimes) ---------- */
+  const bgVideo = $('.bgfx video');
+  if (bgVideo) {
+    if (reduceMotion) bgVideo.pause();
+    else document.addEventListener('visibilitychange', () => { if (!document.hidden) bgVideo.play().catch(() => {}); });
+  }
+
+  /* ---------- Section titles appear word by word ---------- */
+  if (fx && body.dataset.textReveal === '1') {
+    $$('.section-title, .cta__title, .page-title').forEach((el) => {
+      if (el.children.length) return; // keep markup that already has structure
+      const words = el.textContent.trim().split(/\s+/);
+      el.setAttribute('aria-label', el.textContent.trim());
+      el.classList.add('is-split');
+      el.innerHTML = words.map((w, i) => `<span class="split-word" aria-hidden="true"><span style="--i:${i}">${w.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]))}</span></span>`).join(' ');
+      if (!el.closest('[data-reveal]')) {
+        const io = new IntersectionObserver(([en]) => { if (en.isIntersecting) { el.querySelectorAll('.split-word').forEach((s) => s.classList.add('is-in')); io.disconnect(); } }, { threshold: 0.2 });
+        io.observe(el);
+      }
+    });
+  }
 
   /* ---------- Navigation: transparent → glass ---------- */
   const nav = $('#nav');
@@ -74,7 +168,7 @@
 
   /* ---------- Reveal on scroll ---------- */
   const reveals = $$('[data-reveal]');
-  if (!reduceMotion && 'IntersectionObserver' in window) {
+  if (fx && 'IntersectionObserver' in window) {
     // stagger siblings inside grids
     reveals.forEach((el) => {
       const parent = el.parentElement;
@@ -145,6 +239,31 @@
     }, { passive: true });
   }
 
+  /* ---------- 3D tilt on cards + magnetic big buttons (desktop) ---------- */
+  if (finePointer && fx && body.dataset.tilt === '1') {
+    let active = null;
+    document.addEventListener('pointermove', (e) => {
+      const card = e.target.closest && e.target.closest('[data-tilt-card]');
+      if (active && active !== card) { active.classList.remove('is-tilting'); active.style.removeProperty('--rx'); active.style.removeProperty('--ry'); }
+      active = card;
+      if (!card) return;
+      const r = card.getBoundingClientRect();
+      const px = (e.clientX - r.left) / r.width - 0.5, py = (e.clientY - r.top) / r.height - 0.5;
+      card.classList.add('is-tilting');
+      card.style.setProperty('--rx', `${(-py * 7).toFixed(2)}deg`);
+      card.style.setProperty('--ry', `${(px * 9).toFixed(2)}deg`);
+    }, { passive: true });
+    document.addEventListener('pointerleave', () => { if (active) active.classList.remove('is-tilting'); active = null; });
+
+    $$('.btn--lg').forEach((b) => {
+      b.addEventListener('pointermove', (e) => {
+        const r = b.getBoundingClientRect();
+        b.style.transform = `translate(${((e.clientX - r.left) / r.width - 0.5) * 10}px, ${((e.clientY - r.top) / r.height - 0.5) * 8}px)`;
+      });
+      b.addEventListener('pointerleave', () => { b.style.transform = ''; });
+    });
+  }
+
   /* ---------- FAQ accordion ---------- */
   $$('[data-accordion]').forEach((acc) => {
     const buttons = $$('.acc__btn', acc);
@@ -180,7 +299,7 @@
   });
 
   /* ---------- Custom cursor (desktop only) ---------- */
-  if (finePointer && !reduceMotion) {
+  if (finePointer && !reduceMotion && body.dataset.cursor !== '0') {
     const cursor = $('.cursor');
     if (cursor) {
       document.documentElement.classList.add('has-cursor');
@@ -207,7 +326,7 @@
 
   /* ---------- Delicate background particles ---------- */
   const canvas = $('.bg-particles');
-  if (canvas && !reduceMotion) {
+  if (canvas && fx) {
     const ctx = canvas.getContext('2d');
     let w, h, dpr, particles = [], running = true, last = 0;
     const count = () => Math.round(Math.min(70, (innerWidth * innerHeight) / 26000));

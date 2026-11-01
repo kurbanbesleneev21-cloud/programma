@@ -55,6 +55,47 @@ if (!sessionSecret || sessionSecret.length < 32) {
   }
 }
 
+// Connection-string candidates in priority order. Values that are not a postgres URL or still
+// contain a template placeholder (e.g. "[YOUR-PASSWORD]" copied from the Supabase dashboard) are skipped.
+function databaseCandidates() {
+  const seen = new Set();
+  const out = [];
+  for (const name of ['DATABASE_URL', 'POSTGRES_URL', 'POSTGRES_URL_NON_POOLING']) {
+    const value = (env[name] || '').trim().replace(/^["']|["']$/g, '');
+    if (!value || seen.has(value)) continue;
+    if (!/^postgres(ql)?:\/\//i.test(value) || /\[[^\]]*\]@|YOUR[-_]PASSWORD/i.test(value)) {
+      console.error(`[config] ${name} is not a valid postgres:// connection string — ignored`);
+      continue;
+    }
+    seen.add(value);
+    out.push({ name, url: value });
+  }
+  return out;
+}
+
+// A legacy Supabase key is a JWT whose payload carries the project ref. If SUPABASE_URL points to
+// another project (e.g. edited by hand), every Storage request would fail with 401/403, so the URL
+// is derived from the key instead.
+function supabaseUrl(serviceKey) {
+  let url = (env.SUPABASE_URL || env.NEXT_PUBLIC_SUPABASE_URL || '').trim().replace(/\/+$/, '');
+  try {
+    const payload = JSON.parse(Buffer.from(serviceKey.split('.')[1], 'base64url').toString('utf8'));
+    if (payload && /^[a-z0-9]{20}$/.test(payload.ref || '')) {
+      const fromKey = `https://${payload.ref}.supabase.co`;
+      if (url && url !== fromKey && /\.supabase\.co$/.test(url)) {
+        console.warn(`[config] SUPABASE_URL (${url}) does not match the project of SUPABASE_SERVICE_ROLE_KEY — using ${fromKey}`);
+        url = fromKey;
+      } else if (!url) {
+        url = fromKey;
+      }
+    }
+  } catch { /* not a JWT (new sb_secret_ key) — keep the URL as is */ }
+  return url;
+}
+
+const dbCandidates = databaseCandidates();
+const serviceKey = (env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SECRET_KEY || '').trim();
+
 module.exports = {
   ROOT,
   isProd,
@@ -65,7 +106,8 @@ module.exports = {
   dataDir,
   uploadDir: path.join(dataDir, 'uploads'),
   // DATABASE_URL, or POSTGRES_URL as created by the Vercel ↔ Supabase integration (transaction pooler)
-  databaseUrl: env.DATABASE_URL || env.POSTGRES_URL || '',
+  databaseUrl: dbCandidates.length ? dbCandidates[0].url : '',
+  databaseCandidates: dbCandidates,
   sessionSecret,
   admin: {
     user: env.ADMIN_USER || 'admin',
@@ -89,8 +131,8 @@ module.exports = {
     sendClientConfirmation: env.MAIL_CLIENT_CONFIRMATION !== 'false',
   },
   supabase: {
-    url: (env.SUPABASE_URL || env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/+$/, ''),
-    serviceKey: env.SUPABASE_SERVICE_ROLE_KEY || '',
+    url: supabaseUrl(serviceKey),
+    serviceKey,
     privateBucket: env.SUPABASE_PRIVATE_BUCKET || 'order-files',
     publicBucket: env.SUPABASE_PUBLIC_BUCKET || 'site-media',
   },
