@@ -830,7 +830,8 @@
           <section class="panel-card integ">
             <div class="integ__head"><span class="integ__logo integ__logo--g" aria-hidden="true"><svg viewBox="0 0 24 24"><path fill="#4285F4" d="M22.5 12.3c0-.8-.1-1.5-.2-2.3H12v4.3h5.9a5 5 0 0 1-2.2 3.3v2.7h3.6c2-1.9 3.2-4.7 3.2-8z"/><path fill="#34A853" d="M12 23c3 0 5.5-1 7.3-2.7l-3.6-2.7c-1 .7-2.2 1-3.7 1-2.9 0-5.3-1.9-6.2-4.5H2.1v2.8A11 11 0 0 0 12 23z"/><path fill="#FBBC05" d="M5.8 14.1a6.6 6.6 0 0 1 0-4.2V7.1H2.1a11 11 0 0 0 0 9.8z"/><path fill="#EA4335" d="M12 5.4c1.6 0 3.1.6 4.2 1.7l3.2-3.2A11 11 0 0 0 2.1 7.1l3.7 2.8C6.7 7.3 9.1 5.4 12 5.4z"/></svg></span>
               <div><h2>Вход через Google</h2><p class="cms-muted">Вход в админку одной кнопкой и восстановление доступа, если забыли пароль.</p></div>
-              <span class="status ${g.configured ? 'status--in_progress' : 'status--off'}">${g.configured ? 'включён' : 'выключен'}</span></div>
+              <span class="status ${g.configured ? 'status--in_progress' : g.missingEmails ? 'status--review' : 'status--off'}">${g.configured ? 'включён' : g.missingEmails ? 'добавьте Gmail' : 'выключен'}</span></div>
+            ${g.missingEmails ? '<p class="cms-hint cms-warn">Ключи сохранены, но не указан ни один Gmail, которому разрешён вход. Впишите свой адрес ниже и нажмите «Сохранить».</p>' : ''}
             <details class="integ__help" ${g.configured ? '' : 'open'}><summary>Как получить ключи (5 минут)</summary>
               <ol>
                 <li>Откройте <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener">Google Cloud → Credentials</a>, при необходимости создайте проект.</li>
@@ -842,7 +843,7 @@
             <form class="cms-form" data-google>
               <div class="cms-field"><label class="field__label" for="g-id">Client ID</label><input class="input" id="g-id" name="clientId" value="${esc(g.clientId)}" placeholder="xxxx.apps.googleusercontent.com" autocomplete="off" spellcheck="false"></div>
               <div class="cms-field"><label class="field__label" for="g-secret">Client Secret</label><input class="input" id="g-secret" name="clientSecret" placeholder="${g.clientSecretMasked ? `сохранён: ${esc(g.clientSecretMasked)} — оставьте пустым, чтобы не менять` : 'GOCSPX-…'}" autocomplete="off" spellcheck="false"></div>
-              <div class="cms-field"><label class="field__label" for="g-emails">Кому разрешён вход (Gmail, через запятую)</label><input class="input" id="g-emails" name="allowedEmails" value="${esc(g.allowedEmails.join(', '))}" placeholder="you@gmail.com"></div>
+              <div class="cms-field"><label class="field__label" for="g-emails">Кому разрешён вход (Gmail, через запятую)</label><input class="input" id="g-emails" name="allowedEmails" type="email" multiple inputmode="email" value="${esc(g.allowedEmails.join(', '))}" placeholder="ваш-адрес@gmail.com"></div>
               <div class="cms-inline"><button class="btn btn--primary btn--sm" type="submit"><span class="btn__label">Сохранить</span><span class="btn__spinner" aria-hidden="true"></span></button>
               ${g.configured ? '<a class="btn btn--ghost btn--sm" href="/api/admin/google/start"><span>Проверить вход</span></a>' : ''}</div>
             </form>
