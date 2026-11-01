@@ -11,7 +11,8 @@ const sec = require('./security');
 const { orderSchema, adminUpdateSchema, listQuerySchema, formatZodError, emailDomainAccepts } = require('./validation');
 const { upload, mediaUpload, persistFiles, persistMedia, describeMedia, verifyDirectUpload, removeFiles, readStoredFile, UploadError, MEDIA_LIMITS } = require('./uploads');
 const { storage } = require('./storage');
-const { notifyNewOrder } = require('./notify');
+const { notifyNewOrder, sendSiteEmail } = require('./notify');
+const { mountBuilder } = require('./builder-routes');
 const { DEFAULTS, normalize, getContent, saveContent, invalidateContent } = require('./content');
 const { getSettings, updateSettings, publicView } = require('./settings');
 const telegram = require('./telegram');
@@ -511,6 +512,12 @@ function createApp({ store: injected } = {}) {
     });
     res.json(await integrations(req));
   }));
+
+  /* ---- site builder (public wizard, client cabinet, admin management) ---- */
+  mountBuilder(app, api, {
+    wrap, HttpError, needStore, siteContent, originOf, clientIp, limit, requireAdmin, sec, sendSiteEmail,
+    isAdmin: (req) => Boolean(sessionFrom(req)),
+  });
 
   app.use('/api/admin', api);
   app.use('/api', (req, res, next) => next(new HttpError(404, 'Not found')));

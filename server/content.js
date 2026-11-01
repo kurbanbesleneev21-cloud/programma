@@ -198,6 +198,14 @@ const DEFAULTS = {
     text: 'Мы обновляем сайт и скоро вернёмся. Связаться с нами можно по почте или в Telegram.',
   },
   analytics: { yandexMetrika: '', googleAnalytics: '' },
+  builder: {
+    enabled: true,
+    navLabel: 'Создать сайт',
+    title: 'Создайте свой сайт за 5 минут',
+    subtitle: 'Выберите шаблон, заполните анкету и загрузите фото — сайт появится сразу. Править его можно в личном кабинете.',
+    priceNote: 'После создания вы увидите сайт в режиме предпросмотра. Он будет опубликован после оплаты.',
+    publishImmediately: false,
+  },
   layout: { order: ['services', 'about', 'process', 'order', 'projects', 'pricing', 'testimonials', 'advantages', 'faq', 'cta'] },
 };
 

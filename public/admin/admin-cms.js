@@ -186,6 +186,15 @@
       { key: 'maintenance.title', label: 'Заголовок заглушки' },
       { key: 'maintenance.text', label: 'Текст заглушки', type: 'textarea' },
     ] },
+    { id: 'builder', title: '🌐 Конструктор сайтов', anchor: 'create', fields: [
+      { key: 'builder.enabled', label: 'Конструктор сайтов включён (страница /create)', type: 'bool' },
+      { key: 'builder.navLabel', label: 'Пункт в меню сайта (пусто — не показывать)' },
+      { key: 'builder.title', label: 'Заголовок страницы конструктора' },
+      { key: 'builder.subtitle', label: 'Подзаголовок', type: 'textarea' },
+      { key: 'builder.priceNote', label: 'Текст об оплате перед кнопкой «Создать сайт»', type: 'textarea' },
+      { key: 'builder.publishImmediately', label: 'Публиковать сайты сразу, без оплаты', type: 'bool', hint: 'Выключено: новый сайт — черновик с плашкой «предпросмотр», вы публикуете его в разделе «Сайты клиентов». После подключения оплаты публикация будет автоматической.' },
+      { group: 'Сайты клиентов', link: ['#/sites', 'Открыть список сайтов →'] },
+    ] },
     { id: 'seo', title: 'SEO и соцсети', fields: [
       { key: 'seo.title', label: 'Meta Title главной страницы', hint: 'Оптимально 50–60 символов.', counter: 60 },
       { key: 'seo.description', label: 'Meta Description', type: 'textarea', hint: 'Оптимально 140–160 символов.', counter: 160 },
@@ -643,6 +652,72 @@
     mediaGrid($('[data-grid]', root()));
   }
 
+  /* ---------- Client sites (site builder) ---------- */
+  async function sitesPage() {
+    const r = root();
+    r.innerHTML = '<p class="cms-muted">Загрузка…</p>';
+    let data;
+    try { data = await A().api('/sites'); } catch (err) { r.innerHTML = `<p class="empty">${esc(err.message)}</p>`; return; }
+    const st = { draft: 'status--review', active: 'status--in_progress', suspended: 'status--off' };
+    const counts = data.items.reduce((a, x) => ({ ...a, [x.status]: (a[x.status] || 0) + 1 }), {});
+    r.innerHTML = `
+      <header class="ws-head"><div><p class="eyebrow">Конструктор</p><h1 class="ws-title">Сайты клиентов</h1></div>
+        <div class="cms-inline"><a class="btn btn--ghost btn--sm" href="#/content/builder"><span>Настройки</span></a><a class="btn btn--primary btn--sm" href="/create" target="_blank" rel="noopener"><span>Открыть конструктор ↗</span></a></div></header>
+      <div class="kpis">
+        <div class="kpi"><span class="kpi__label">Всего сайтов</span><b class="kpi__value">${data.items.length}</b></div>
+        <div class="kpi"><span class="kpi__label">Ждут оплаты</span><b class="kpi__value">${counts.draft || 0}</b><span class="kpi__hint">черновики</span></div>
+        <div class="kpi"><span class="kpi__label">Опубликованы</span><b class="kpi__value">${counts.active || 0}</b></div>
+        <div class="kpi"><span class="kpi__label">Отключены</span><b class="kpi__value">${counts.suspended || 0}</b></div>
+      </div>
+      <div class="sites">${data.items.map((x) => `
+        <article class="site-card panel-card" data-id="${x.id}">
+          <div class="site-card__pv" style="--accent:${esc(x.data.style.accent)}">${x.data.hero || x.data.logo ? `<img src="${esc(x.data.hero || x.data.logo)}" alt="" loading="lazy">` : `<span>${esc((x.data.title || '?').slice(0, 1))}</span>`}</div>
+          <div class="site-card__body">
+            <div class="site-card__top"><h3>${esc(x.data.title)}</h3><span class="status ${st[x.status]}">${esc(data.statuses[x.status])}</span></div>
+            <a class="site-card__url" href="/s/${esc(x.slug)}" target="_blank" rel="noopener">/s/${esc(x.slug)} ↗</a>
+            <p class="cms-muted">${esc(data.templates[x.template] || x.template)} · создан ${esc(A().fmtDate(x.created_at))}${x.paid_at ? ` · оплачен ${esc(A().fmtDate(x.paid_at))}` : ''}</p>
+            <p class="site-card__owner"><b>${esc(x.owner_name)}</b> · <a href="mailto:${esc(x.owner_email)}">${esc(x.owner_email)}</a>${x.owner_phone ? ` · <a href="tel:${esc(x.owner_phone.replace(/[^\d+]/g, ''))}">${esc(x.owner_phone)}</a>` : ''}</p>
+            <div class="cms-inline">
+              ${x.status !== 'active' ? `<button type="button" class="btn btn--primary btn--sm" data-act="publish"><span>Опубликовать</span></button>` : ''}
+              ${x.status === 'active' ? `<button type="button" class="btn btn--ghost btn--sm" data-act="draft"><span>В черновик</span></button>` : ''}
+              ${x.status !== 'suspended' ? `<button type="button" class="btn btn--ghost btn--sm" data-act="suspend"><span>Отключить</span></button>` : ''}
+              <a class="btn btn--ghost btn--sm" href="/s/${esc(x.slug)}/edit" target="_blank" rel="noopener"><span>Редактировать</span></a>
+              <button type="button" class="btn btn--ghost btn--sm" data-act="link"><span>Ссылка для клиента</span></button>
+              <button type="button" class="btn btn--ghost btn--sm btn--danger" data-act="delete"><span>Удалить</span></button>
+            </div>
+          </div>
+        </article>`).join('') || '<p class="empty">Пока никто не создал сайт. Поделитесь ссылкой на конструктор: <a href="/create" target="_blank">/create</a></p>'}</div>`;
+
+    r.querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click', async () => {
+      const card = b.closest('[data-id]');
+      const id = card.dataset.id;
+      const item = data.items.find((x) => String(x.id) === id);
+      const act = b.dataset.act;
+      try {
+        if (act === 'publish') {
+          const paid = confirm(`Опубликовать «${item.data.title}»?\n\nОК — отметить как оплаченный и опубликовать.\nОтмена — ничего не делать.`);
+          if (!paid) return;
+          await A().api(`/sites/${id}`, { method: 'PATCH', body: { status: 'active', markPaid: true } });
+          A().toast('Сайт опубликован');
+        } else if (act === 'draft') {
+          await A().api(`/sites/${id}`, { method: 'PATCH', body: { status: 'draft' } }); A().toast('Сайт снова в режиме предпросмотра');
+        } else if (act === 'suspend') {
+          if (!confirm('Отключить сайт? Посетители увидят «Сайт отключён».')) return;
+          await A().api(`/sites/${id}`, { method: 'PATCH', body: { status: 'suspended' } }); A().toast('Сайт отключён');
+        } else if (act === 'link') {
+          if (!confirm('Создать новую ссылку для редактирования? Старая ссылка клиента перестанет работать.')) return;
+          const { editUrl } = await A().api(`/sites/${id}/link`, { method: 'POST' });
+          try { await navigator.clipboard.writeText(editUrl); A().toast('Ссылка скопирована — отправьте её клиенту'); } catch { prompt('Ссылка для клиента:', editUrl); }
+          return;
+        } else if (act === 'delete') {
+          if (!confirm(`Удалить сайт «${item.data.title}» безвозвратно?`)) return;
+          await A().api(`/sites/${id}`, { method: 'DELETE' }); A().toast('Сайт удалён');
+        }
+        sitesPage();
+      } catch (err) { A().fail(err); }
+    }));
+  }
+
   /* ---------- Integrations: Telegram bot + Google sign-in ---------- */
   async function integrationsPage() {
     const r = root();
@@ -881,6 +956,7 @@
     else if (hash.startsWith('#/media')) mediaPage();
     else if (hash.startsWith('#/settings')) settingsPage();
     else if (hash.startsWith('#/integrations')) integrationsPage();
+    else if (hash.startsWith('#/sites')) sitesPage();
     if (keepScroll) scrollTo(0, y);
   }
 

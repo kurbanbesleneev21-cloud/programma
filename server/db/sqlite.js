@@ -76,6 +76,22 @@ CREATE TABLE IF NOT EXISTS events (
   at    INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_events ON events(kind, key, at);
+CREATE TABLE IF NOT EXISTS sites (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  slug        TEXT NOT NULL UNIQUE,
+  status      TEXT NOT NULL DEFAULT 'draft',
+  template    TEXT NOT NULL,
+  data        TEXT NOT NULL,
+  owner_name  TEXT NOT NULL DEFAULT '',
+  owner_email TEXT NOT NULL DEFAULT '',
+  owner_phone TEXT NOT NULL DEFAULT '',
+  token_hash  TEXT NOT NULL,
+  ip_hash     TEXT NOT NULL DEFAULT '',
+  paid_at     TEXT,
+  created_at  TEXT NOT NULL,
+  updated_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sites_created ON sites(created_at);
 CREATE TABLE IF NOT EXISTS counters (
   key TEXT PRIMARY KEY,
   n   INTEGER NOT NULL DEFAULT 0
@@ -101,6 +117,11 @@ function rowToOrder(row) {
   if (!row) return null;
   const { search_text, ip_hash, user_agent, ...rest } = { ...row };
   return { ...rest, services: JSON.parse(row.services) };
+}
+
+function siteRow(row) {
+  if (!row) return null;
+  return { ...row, id: Number(row.id), data: JSON.parse(row.data) };
 }
 
 function createSqliteStore(dataDir) {
@@ -207,6 +228,27 @@ function createSqliteStore(dataDir) {
       const { changes } = db.prepare('DELETE FROM orders WHERE id = ?').run(id);
       return changes ? files : null;
     },
+
+    /* ---- client sites (site builder) ---- */
+    async createSite(site) {
+      const now = new Date().toISOString();
+      const { lastInsertRowid } = db.prepare(
+        'INSERT INTO sites (slug, status, template, data, owner_name, owner_email, owner_phone, token_hash, ip_hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      ).run(site.slug, site.status, site.template, JSON.stringify(site.data), site.owner_name, site.owner_email, site.owner_phone, site.token_hash, site.ip_hash || '', now, now);
+      return this.getSite(Number(lastInsertRowid));
+    },
+    async getSite(id) { return siteRow(db.prepare('SELECT * FROM sites WHERE id = ?').get(id)); },
+    async getSiteBySlug(slug) { return siteRow(db.prepare('SELECT * FROM sites WHERE slug = ?').get(slug)); },
+    async listSites({ limit = 200 } = {}) { return db.prepare('SELECT * FROM sites ORDER BY id DESC LIMIT ?').all(limit).map(siteRow); },
+    async updateSite(id, patch) {
+      const cols = ['status', 'template', 'data', 'owner_name', 'owner_email', 'owner_phone', 'token_hash', 'paid_at'].filter((k) => k in patch);
+      if (cols.length) {
+        const vals = cols.map((k) => (k === 'data' ? JSON.stringify(patch[k]) : patch[k]));
+        db.prepare(`UPDATE sites SET ${cols.map((k) => `${k} = ?`).join(', ')}, updated_at = ? WHERE id = ?`).run(...vals, new Date().toISOString(), id);
+      }
+      return this.getSite(id);
+    },
+    async deleteSite(id) { return db.prepare('DELETE FROM sites WHERE id = ?').run(id).changes > 0; },
 
     /* ---- counters (page views per day) ---- */
     async bumpCounter(key, by = 1) {

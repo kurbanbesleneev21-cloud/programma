@@ -78,6 +78,22 @@ CREATE TABLE IF NOT EXISTS events (
   at   BIGINT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_events ON events(kind, key, at);
+CREATE TABLE IF NOT EXISTS sites (
+  id          BIGSERIAL PRIMARY KEY,
+  slug        TEXT NOT NULL UNIQUE,
+  status      TEXT NOT NULL DEFAULT 'draft',
+  template    TEXT NOT NULL,
+  data        JSONB NOT NULL,
+  owner_name  TEXT NOT NULL DEFAULT '',
+  owner_email TEXT NOT NULL DEFAULT '',
+  owner_phone TEXT NOT NULL DEFAULT '',
+  token_hash  TEXT NOT NULL,
+  ip_hash     TEXT NOT NULL DEFAULT '',
+  paid_at     TIMESTAMPTZ,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_sites_created ON sites(created_at);
 CREATE TABLE IF NOT EXISTS counters (
   key TEXT PRIMARY KEY,
   n   BIGINT NOT NULL DEFAULT 0
@@ -100,6 +116,18 @@ const SORTS = {
 };
 
 const iso = (v) => (v instanceof Date ? v.toISOString() : v);
+
+function siteRow(row) {
+  if (!row) return null;
+  return {
+    ...row,
+    id: Number(row.id),
+    data: typeof row.data === 'string' ? JSON.parse(row.data) : row.data,
+    paid_at: row.paid_at ? iso(row.paid_at) : null,
+    created_at: iso(row.created_at),
+    updated_at: iso(row.updated_at),
+  };
+}
 
 function rowToOrder(row) {
   if (!row) return null;
@@ -313,6 +341,26 @@ async function createPostgresStore(connectionString) {
       const { rowCount } = await pool.query('DELETE FROM orders WHERE id = $1', [id]);
       return rowCount ? files : null;
     },
+
+    async createSite(site) {
+      const { rows } = await pool.query(
+        'INSERT INTO sites (slug, status, template, data, owner_name, owner_email, owner_phone, token_hash, ip_hash) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *',
+        [site.slug, site.status, site.template, JSON.stringify(site.data), site.owner_name, site.owner_email, site.owner_phone, site.token_hash, site.ip_hash || '']
+      );
+      return siteRow(rows[0]);
+    },
+    async getSite(id) { return siteRow((await pool.query('SELECT * FROM sites WHERE id = $1', [id])).rows[0]); },
+    async getSiteBySlug(slug) { return siteRow((await pool.query('SELECT * FROM sites WHERE slug = $1', [slug])).rows[0]); },
+    async listSites({ limit = 200 } = {}) { return (await pool.query('SELECT * FROM sites ORDER BY id DESC LIMIT $1', [limit])).rows.map(siteRow); },
+    async updateSite(id, patch) {
+      const cols = ['status', 'template', 'data', 'owner_name', 'owner_email', 'owner_phone', 'token_hash', 'paid_at'].filter((k) => k in patch);
+      if (cols.length) {
+        const vals = cols.map((k) => (k === 'data' ? JSON.stringify(patch[k]) : patch[k]));
+        await pool.query(`UPDATE sites SET ${cols.map((k, i) => `${k} = $${i + 1}`).join(', ')}, updated_at = now() WHERE id = $${cols.length + 1}`, [...vals, id]);
+      }
+      return this.getSite(id);
+    },
+    async deleteSite(id) { return (await pool.query('DELETE FROM sites WHERE id = $1', [id])).rowCount > 0; },
 
     async bumpCounter(key, by = 1) {
       await pool.query('INSERT INTO counters (key, n) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET n = counters.n + EXCLUDED.n', [key, by]);
