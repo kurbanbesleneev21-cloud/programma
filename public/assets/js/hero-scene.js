@@ -343,6 +343,9 @@ func main() {
     });
   }
 
+  // phones: the device tilt (from main.js) drives the scene parallax
+  document.addEventListener('cf:tilt', (e) => { pointer.x = e.detail.x; pointer.y = e.detail.y; });
+
   if (!isSmall) {
     hero.addEventListener('pointermove', (e) => {
       const r = hero.getBoundingClientRect();

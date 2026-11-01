@@ -640,9 +640,9 @@ function createApp({ store: injected } = {}) {
     extensions: ['html'],
     index: false,
     setHeaders(res, filePath) {
-      if (/\.(css|js|svg|png|jpg|webp|woff2|mp4|webm)$/.test(filePath)) {
-        res.set('Cache-Control', config.isProd ? 'public, max-age=604800' : 'no-cache');
-      }
+      // CSS/JS are always revalidated (pages also reference them with ?v=<hash>); images can stay cached.
+      if (/\.(css|js)$/.test(filePath)) res.set('Cache-Control', 'public, max-age=0, must-revalidate');
+      else if (/\.(svg|png|jpg|webp|woff2|mp4|webm)$/.test(filePath)) res.set('Cache-Control', config.isProd ? 'public, max-age=604800' : 'no-cache');
     },
   }));
   app.get('/admin', (req, res) => {

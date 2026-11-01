@@ -6,7 +6,7 @@
   "outputDirectory": "public",
   "functions": {
     "api/index.js": {
-      "includeFiles": "server/**",
+      "includeFiles": "{server/**,public/assets/**}",
       "maxDuration": 60
     }
   },
@@ -18,7 +18,25 @@
   ],
   "headers": [
     {
-      "source": "/assets/(.*)",
+      "source": "/assets/(.*).css",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=0, must-revalidate"
+        }
+      ]
+    },
+    {
+      "source": "/assets/(.*).js",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=0, must-revalidate"
+        }
+      ]
+    },
+    {
+      "source": "/assets/img/(.*)",
       "headers": [
         {
           "key": "Cache-Control",
@@ -32,6 +50,10 @@
         {
           "key": "X-Robots-Tag",
           "value": "noindex, nofollow"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=0, must-revalidate"
         }
       ]
     }

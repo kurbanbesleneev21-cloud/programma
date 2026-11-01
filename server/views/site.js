@@ -4,6 +4,7 @@
 
 const { esc } = require('./partials');
 const { TEMPLATES } = require('../sites');
+const { asset } = require('../assets');
 
 const ICON = {
   phone: '<path d="M6.6 10.8a15.2 15.2 0 0 0 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1A17 17 0 0 1 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.3.2 2.5.6 3.6.1.3 0 .7-.2 1z"/>',
@@ -132,9 +133,9 @@ function renderSite(site, { origin, brand = 'CODEFORGE', preview = false, canEdi
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Manrope:wght@600;700;800&display=swap">
-  <link rel="stylesheet" href="/assets/css/site.css">
+  <link rel="stylesheet" href="${asset('/assets/css/site.css')}">
   <script type="application/ld+json">${JSON.stringify(ld).replace(/</g, '\\u003c')}</script>
-  <script src="/assets/js/site.js" defer></script>
+  <script src="${asset('/assets/js/site.js')}" defer></script>
 </head>
 <body class="sx sx--${esc(site.template)}" style="--accent:${d.style.accent}">
   ${preview ? `<div class="sx-preview" role="status"><b>Предпросмотр.</b> Сайт будет опубликован после оплаты.${canEdit ? ` <a href="/s/${esc(site.slug)}/edit">Редактировать</a>` : ''}</div>` : ''}
@@ -157,7 +158,7 @@ ${order.join('\n')}
 }
 
 function siteStatusPage({ title, text, origin, brand = 'CODEFORGE' }) {
-  return `<!DOCTYPE html><html lang="ru" data-theme="dark"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>${esc(title)}</title><link rel="stylesheet" href="/assets/css/site.css"></head>
+  return `<!DOCTYPE html><html lang="ru" data-theme="dark"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>${esc(title)}</title><link rel="stylesheet" href="${asset('/assets/css/site.css')}"></head>
 <body class="sx" style="--accent:#6d5dfc"><main class="sx-status"><h1 class="sx-h1">${esc(title)}</h1><p class="sx-lead">${esc(text)}</p><a class="sx-btn" href="${esc(origin)}/">${esc(brand)}</a></main></body></html>`;
 }
 
