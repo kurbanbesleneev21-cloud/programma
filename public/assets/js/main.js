@@ -5,7 +5,9 @@
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => [...r.querySelectorAll(s)];
   const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const finePointer = matchMedia('(hover: hover) and (pointer: fine)').matches;
+  // Touch devices (incl. phones in "desktop site" mode) never get mouse-only effects.
+  const hasTouch = (navigator.maxTouchPoints || 0) > 0 || matchMedia('(any-pointer: coarse)').matches;
+  const finePointer = matchMedia('(hover: hover) and (pointer: fine)').matches && !hasTouch;
   const body = document.body;
   const fx = body.dataset.fx !== '0' && !reduceMotion;
   const store = {

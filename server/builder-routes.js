@@ -236,7 +236,8 @@ function mountBuilder(app, api, d) {
     }
     if ('geminiKey' in b) {
       patch.geminiKey = String(b.geminiKey || '').trim();
-      if (patch.geminiKey && !/^[\w-]{30,60}$/.test(patch.geminiKey)) throw new HttpError(422, 'Ключ Gemini выглядит как AIza… (около 39 символов) — скопируйте его из Google AI Studio целиком');
+      // Google issues both classic "AIza…" keys and newer "AQ.…" keys (with dots).
+      if (patch.geminiKey && !/^[\w.-]{20,200}$/.test(patch.geminiKey)) throw new HttpError(422, 'Ключ Gemini не похож на настоящий — скопируйте его в Google AI Studio кнопкой «Копировать ключ»');
     }
     if ('geminiModel' in b) {
       patch.geminiModel = String(b.geminiModel || '').trim() || 'gemini-2.5-flash';

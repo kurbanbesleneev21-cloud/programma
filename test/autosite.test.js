@@ -172,10 +172,11 @@ test('with a Claude key the site is written by Claude', async () => {
 
 test('free Gemini writes the site when its key is set (preferred over Claude)', async () => {
   assert.equal((await admin('/ai', 'POST', { geminiKey: 'short' })).status, 422);
-  const saved = await (await admin('/ai', 'POST', { provider: 'gemini', geminiKey: 'AIzaSyTestKey0123456789abcdefghijklmnop', geminiModel: 'gemini-2.5-flash' })).json();
+  assert.equal((await admin('/ai', 'POST', { geminiKey: 'AQ.test-not-a-real-key-000000000000' })).status, 200, 'new-style AQ. keys are accepted');
+  const saved = await (await admin('/ai', 'POST', { provider: 'gemini', geminiKey: 'AIza-test-not-a-real-key-000000000000', geminiModel: 'gemini-2.5-flash' })).json();
   assert.equal(saved.ai.provider, 'gemini');
   assert.equal(saved.ai.configured, true);
-  assert.ok(!JSON.stringify(saved).includes('AIzaSyTestKey0123456789abcdefghijklmnop'));
+  assert.ok(!JSON.stringify(saved).includes('AIza-test-not-a-real-key-000000000000'));
 
   const { data, cookie } = await order(['website'], { project_name: 'Йога Студия Лотос', description: 'Сайт для студии йоги: расписание, тренеры, цены на абонементы.' });
   assert.equal(data.site.ai, true);
@@ -188,7 +189,7 @@ test('free Gemini writes the site when its key is set (preferred over Claude)', 
   assert.equal(claudeCalls.length, before, 'Claude is not called when Gemini is selected');
   const call = geminiCalls[0];
   assert.match(call.url, /models\/gemini-2\.5-flash:generateContent$/);
-  assert.equal(call.key, 'AIzaSyTestKey0123456789abcdefghijklmnop');
+  assert.equal(call.key, 'AIza-test-not-a-real-key-000000000000');
   assert.equal(call.body.generationConfig.responseMimeType, 'application/json');
   assert.match(call.body.contents[0].parts[0].text, /Йога Студия Лотос/);
   const html = await (await fetch(`${base}/s/${data.site.slug}`)).text();
