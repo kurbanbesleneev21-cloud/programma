@@ -25,7 +25,12 @@ function mountBuilder(app, api, d) {
     return c;
   };
   const cookieOf = (req) => sec.parseCookies(req.get('cookie'))[sites.SITE_COOKIE];
-  const isOwner = (req, site) => sites.readSiteSession(cookieOf(req), site);
+  // Owner: the secret-link cookie, or a signed-in client account with the same e-mail.
+  const isOwner = (req, site) => {
+    if (sites.readSiteSession(cookieOf(req), site)) return true;
+    const me = d.clientOf && d.clientOf(req);
+    return Boolean(me && site.owner_email && me.email === String(site.owner_email).toLowerCase());
+  };
   const siteBySlug = async (store, slug) => {
     const s = String(slug || '').toLowerCase();
     return /^[a-z0-9-]{3,40}$/.test(s) ? store.getSiteBySlug(s) : null;

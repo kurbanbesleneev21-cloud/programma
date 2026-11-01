@@ -13,12 +13,14 @@ const { upload, mediaUpload, persistFiles, persistMedia, describeMedia, verifyDi
 const { storage } = require('./storage');
 const { notifyNewOrder, sendSiteEmail } = require('./notify');
 const { mountBuilder } = require('./builder-routes');
+const { mountAccount } = require('./account-routes');
 const sitesLib = require('./sites');
 const aiSite = require('./ai-site');
 const { DEFAULTS, normalize, getContent, saveContent, invalidateContent } = require('./content');
 const { getSettings, updateSettings, publicView, aiKey } = require('./settings');
 const telegram = require('./telegram');
 const google = require('./google');
+const clients = require('./clients');
 const { ICONS } = require('./views/icons');
 const { SOCIAL_ICONS } = require('./views/partials');
 const { renderHome } = require('./views/home');
@@ -293,11 +295,17 @@ function createApp({ store: injected } = {}) {
   api.get('/auth-options', wrap(async (req, res) => {
     let googleOn = false;
     try { googleOn = google.configured(await getSettings(await getStore())); } catch { /* db down */ }
+    // (client accounts use /api/account/options)
     res.json({ google: googleOn });
   }));
 
   api.get('/google/start', wrap(async (req, res) => {
     const st = await getSettings(await needStore());
+    if (req.query.mode === 'client') {
+      if (!google.keysSet(st)) return res.redirect(302, `/account?error=${encodeURIComponent('Вход через Google пока не настроен владельцем сайта')}`);
+      const { url, cookie } = google.startUrl(st, originOf(req), { mode: 'client' });
+      return res.set('Set-Cookie', cookie).redirect(302, url);
+    }
     if (!google.configured(st)) {
       const why = st.google.clientId && !st.google.allowedEmails.length ? 'Вход через Google не настроен: добавьте ваш Gmail в «Кому разрешён вход» (Интеграции)' : 'Вход через Google не настроен';
       return res.redirect(302, `/admin/?error=${encodeURIComponent(why)}`);
@@ -307,20 +315,26 @@ function createApp({ store: injected } = {}) {
   }));
 
   api.get('/google/callback', async (req, res) => {
-    const back = (msg) => res.set('Set-Cookie', google.stateCookie('', 0)).redirect(302, `/admin/${msg ? `?error=${encodeURIComponent(msg)}` : ''}`);
+    const { state: cookieState, mode } = google.parseState(sec.parseCookies(req.get('cookie'))[google.STATE_COOKIE]);
+    const home = mode === 'client' ? '/account' : '/admin/';
+    const back = (msg) => res.append('Set-Cookie', google.stateCookie('', 0)).redirect(302, `${home}${msg ? `?error=${encodeURIComponent(msg)}` : ''}`);
     try {
       if (req.query.error) return back(req.query.error === 'access_denied' ? 'Вход через Google отменён' : `Google: ${req.query.error}`);
       const store = await needStore();
       const key = sec.ipHash(clientIp(req));
       if ((await store.countEvents('login_fail', key, 15 * 60 * 1000)) >= 8) return back('Слишком много попыток входа. Повторите через 15 минут.');
       const st = await getSettings(store);
-      const cookieState = sec.parseCookies(req.get('cookie'))[google.STATE_COOKIE];
       let who;
       try {
-        who = await google.finish(st, { code: String(req.query.code || ''), state: String(req.query.state || ''), cookieState, origin: originOf(req) });
+        who = await google.finish(st, { code: String(req.query.code || ''), state: String(req.query.state || ''), cookieState, origin: originOf(req), mode });
       } catch (err) {
         if (err.status === 403) await store.addEvent('login_fail', key);
         throw err;
+      }
+      if (mode === 'client') {
+        const client = await store.upsertClient(who);
+        res.append('Set-Cookie', clients.clientCookie(client));
+        return back('');
       }
       res.append('Set-Cookie', sec.sessionCookie(sec.createSession(config.admin.user, { method: 'google', email: who.email }), sec.SESSION_TTL_MS));
       return back('');
@@ -544,7 +558,6 @@ function createApp({ store: injected } = {}) {
     if (bad) throw new HttpError(422, `Некорректный e-mail: ${bad}`);
     const clientId = String(b.clientId || '').trim();
     if (clientId && !/\.apps\.googleusercontent\.com$/.test(clientId)) throw new HttpError(422, 'Client ID должен заканчиваться на .apps.googleusercontent.com');
-    if (clientId && !emails.length) throw new HttpError(422, 'Укажите хотя бы один Gmail, которому разрешён вход (например, ваш)');
     await updateSettings(req.store, (st) => {
       st.google.clientId = clientId;
       if (typeof b.clientSecret === 'string' && b.clientSecret.trim()) st.google.clientSecret = b.clientSecret.trim();
@@ -554,10 +567,12 @@ function createApp({ store: injected } = {}) {
     res.json(await integrations(req));
   }));
 
-  /* ---- site builder (public wizard, client cabinet, admin management) ---- */
+  /* ---- client accounts (Google) and the site builder ---- */
+  const { clientOf } = mountAccount(app, api, { wrap, HttpError, needStore, siteContent, originOf, requireAdmin, sec });
   mountBuilder(app, api, {
     wrap, HttpError, needStore, siteContent, originOf, clientIp, limit, requireAdmin, sec, sendSiteEmail,
     isAdmin: (req) => Boolean(sessionFrom(req)),
+    clientOf,
   });
 
   app.use('/api/admin', api);

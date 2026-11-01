@@ -174,6 +174,7 @@ function nav(c, { home = false } = {}) {
         ${links.map(([id, label, href]) => `<a href="${href}"${home ? ` data-spy="${id}"` : ''}>${label}</a>`).join('')}
       </nav>
       <div class="nav__actions">
+        ${c.account && c.account.enabled ? `<a class="nav__account" href="/account" aria-label="Личный кабинет" data-account-link><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8.5" r="3.8" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M4.5 20c1.4-3.6 4.2-5.4 7.5-5.4s6.1 1.8 7.5 5.4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg><span>${esc(c.account.label || 'Войти')}</span></a>` : ''}
         <a class="btn btn--primary btn--sm nav__cta" href="${order}"${home ? ' data-order-link' : ''}><span>${esc(c.nav.ctaLabel)}</span>${ARROW}</a>
         <button class="burger" type="button" aria-expanded="false" aria-controls="mobile-menu" aria-label="Открыть меню"><span></span><span></span></button>
       </div>
@@ -184,6 +185,7 @@ function nav(c, { home = false } = {}) {
         ${links.map(([, label, href], i) => `<a href="${href}"><span>${String(i + 1).padStart(2, '0')}</span>${label}</a>`).join('')}
       </nav>
       <a class="btn btn--primary btn--block" href="${order}"><span>${esc(c.nav.ctaLabel)}</span>${ARROW}</a>
+      ${c.account && c.account.enabled ? '<a class="btn btn--ghost btn--block" href="/account"><span>Личный кабинет</span></a>' : ''}
       <p class="mobile-menu__meta">${esc([c.contacts.email, c.contacts.responseNote].filter(Boolean).join(' · '))}</p>
   </div>`;
 }

@@ -198,6 +198,7 @@ const DEFAULTS = {
     text: 'Мы обновляем сайт и скоро вернёмся. Связаться с нами можно по почте или в Telegram.',
   },
   analytics: { yandexMetrika: '', googleAnalytics: '' },
+  account: { enabled: true, label: 'Войти' },
   builder: {
     autoFromOrders: true,      // an order for a website/shop instantly gets its own draft site
     enabled: false,            // the separate /create wizard (hidden by default)

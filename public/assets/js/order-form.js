@@ -522,4 +522,12 @@
       if (s > 1) goTo(s, { focus: false });
     }
   } catch { /* ignore */ }
+
+  /* ---------- Signed-in client: prefill name and e-mail ---------- */
+  fetch('/api/account/me', { credentials: 'same-origin' }).then((r) => r.json()).then(({ client }) => {
+    if (!client) return;
+    const fill = (name, v) => { const el = form.elements[name]; if (el && !el.value && v) { el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); } };
+    fill('name', client.name);
+    fill('email', client.email);
+  }).catch(() => {});
 })();
