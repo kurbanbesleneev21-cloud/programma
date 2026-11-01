@@ -142,7 +142,7 @@ class AiError extends Error {
   constructor(message, status) { super(message); this.aiStatus = status; }
 }
 
-async function generateWithGemini(order, apiKey, model = 'gemini-2.5-flash') {
+async function generateWithGemini(order, apiKey, model = 'gemini-1.5-flash') {
   let res;
   try {
     res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
