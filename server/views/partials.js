@@ -2,6 +2,8 @@
 
 // Shared page chrome (head, navigation, footer) rendered from editable content.
 
+const { asset } = require('../assets');
+
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 // Only allow harmless URL schemes in admin-edited links/images.
@@ -59,9 +61,9 @@ function head({ c, origin, title, description, canonical, ogTitle, ogDescription
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Manrope:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
-  <link rel="stylesheet" href="/assets/css/main.css">
+  <link rel="stylesheet" href="${asset('/assets/css/main.css')}">
   ${jsonLd ? `<script type="application/ld+json">${JSON.stringify(jsonLd).replace(/</g, '\\u003c')}</script>` : ''}
-  ${['/assets/js/main.js', ...scripts].map((s) => `<script src="${s}" defer></script>`).join('\n  ')}
+  ${['/assets/js/main.js', ...scripts].map((s) => `<script src="${asset(s)}" defer></script>`).join('\n  ')}
   ${c.analytics && (c.analytics.yandexMetrika || c.analytics.googleAnalytics) ? '<script src="/analytics.js" defer></script>' : ''}
 </head>`;
 }

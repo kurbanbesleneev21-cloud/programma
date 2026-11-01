@@ -71,7 +71,7 @@
     }
     if (heroMedia && heroEl) {
       const h = heroEl.offsetHeight || innerHeight;
-      const o = Math.max(0, 1 - y / (h * 0.85));
+      const o = Math.max(0, 1 - y / (h * (innerWidth < 760 ? 0.5 : 0.75)));
       heroMedia.style.opacity = o.toFixed(3);
       heroMedia.classList.toggle('is-gone', o <= 0.001);
     }
@@ -264,6 +264,41 @@
       });
       b.addEventListener('pointerleave', () => { b.style.transform = ''; });
     });
+  }
+
+  /* ---------- 3D on touch screens: cards tilt toward the finger ---------- */
+  if (hasTouch && fx && body.dataset.tilt === '1') {
+    const reset = (card) => { card.classList.remove('is-pressed'); card.style.removeProperty('--rx'); card.style.removeProperty('--ry'); };
+    document.addEventListener('touchstart', (e) => {
+      const card = e.target.closest && e.target.closest('[data-tilt-card]');
+      if (!card) return;
+      const t = e.touches[0], r = card.getBoundingClientRect();
+      card.style.setProperty('--rx', `${(-((t.clientY - r.top) / r.height - 0.5) * 10).toFixed(2)}deg`);
+      card.style.setProperty('--ry', `${(((t.clientX - r.left) / r.width - 0.5) * 12).toFixed(2)}deg`);
+      card.classList.add('is-pressed');
+      const end = () => { reset(card); removeEventListener('touchend', end); removeEventListener('touchcancel', end); removeEventListener('scroll', end); };
+      addEventListener('touchend', end, { passive: true });
+      addEventListener('touchcancel', end, { passive: true });
+      addEventListener('scroll', end, { passive: true, once: true });
+    }, { passive: true });
+  }
+
+  /* ---------- 3D hero on phones: follows the device tilt (Android; iOS needs a permission prompt, skipped) ---------- */
+  const heroContent = $('.hero__content');
+  if (hasTouch && fx && heroContent && 'DeviceOrientationEvent' in window && typeof DeviceOrientationEvent.requestPermission !== 'function') {
+    let base = null, raf = null, gx = 0, gy = 0;
+    addEventListener('deviceorientation', (e) => {
+      if (e.beta == null || e.gamma == null) return;
+      if (!base) base = { b: e.beta, g: e.gamma };
+      gx = Math.max(-1, Math.min(1, (e.gamma - base.g) / 25));
+      gy = Math.max(-1, Math.min(1, (e.beta - base.b) / 25));
+      if (!raf) raf = requestAnimationFrame(() => {
+        raf = null;
+        if (scrollY > innerHeight) return;
+        heroContent.style.transform = `perspective(1100px) rotateY(${(gx * 6).toFixed(2)}deg) rotateX(${(-gy * 5).toFixed(2)}deg)`;
+        document.dispatchEvent(new CustomEvent('cf:tilt', { detail: { x: gx / 2, y: gy / 2 } }));
+      });
+    }, { passive: true });
   }
 
   /* ---------- FAQ accordion ---------- */
