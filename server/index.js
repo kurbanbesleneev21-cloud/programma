@@ -238,7 +238,7 @@ function createApp({ store: injected } = {}) {
               url: `${origin}/s/${created.slug}`,
               editUrl: `${origin}/s/${created.slug}/edit#key=${editToken}`,
               status: created.status,
-              ai: Boolean(aiKey(st)),
+              ai: aiKey(st),
             };
             res.set('Set-Cookie', sitesLib.siteCookie(sec.parseCookies(req.get('cookie'))[sitesLib.SITE_COOKIE], created));
           } catch (err) {

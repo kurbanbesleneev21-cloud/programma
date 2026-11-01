@@ -26,7 +26,10 @@ const DEFAULTS = {
     allowedEmails: [],
   },
   ai: {
-    apiKey: '',          // Claude API key for generating client sites from orders
+    provider: 'gemini',  // 'gemini' (free tier) | 'claude'
+    apiKey: '',          // Claude API key
+    geminiKey: '',       // Google AI Studio key
+    geminiModel: 'gemini-2.5-flash',
   },
 };
 
@@ -47,6 +50,8 @@ function conform(raw) {
   s.telegram.chats = s.telegram.chats
     .filter((c) => c && /^-?\d{1,20}$/.test(String(c.id)))
     .map((c) => ({ id: String(c.id), title: String(c.title || '').slice(0, 120), addedAt: String(c.addedAt || '') }));
+  if (!['gemini', 'claude'].includes(s.ai.provider)) s.ai.provider = 'gemini';
+  if (!/^[\w.-]{3,80}$/.test(s.ai.geminiModel)) s.ai.geminiModel = 'gemini-2.5-flash';
   s.google.allowedEmails = s.google.allowedEmails.map((e) => String(e).trim().toLowerCase()).filter((e) => /^[^\s@]+@[^\s@]+$/.test(e));
   return s;
 }
@@ -98,16 +103,27 @@ function publicView(s, { origin } = {}) {
       redirectUri: origin ? `${origin}/api/admin/google/callback` : '',
     },
     ai: {
-      configured: Boolean(s.ai.apiKey || process.env.ANTHROPIC_API_KEY),
+      provider: s.ai.provider,
+      configured: Boolean(aiConfig(s)),
       keyMasked: mask(s.ai.apiKey),
       fromEnv: !s.ai.apiKey && Boolean(process.env.ANTHROPIC_API_KEY),
+      geminiKeyMasked: mask(s.ai.geminiKey),
+      geminiFromEnv: !s.ai.geminiKey && Boolean(process.env.GEMINI_API_KEY),
+      geminiModel: s.ai.geminiModel || 'gemini-2.5-flash',
     },
   };
 }
 
-// Claude key: admin panel first, ANTHROPIC_API_KEY env var as fallback.
-const aiKey = (s) => s.ai.apiKey || process.env.ANTHROPIC_API_KEY || '';
+// Which AI writes client sites. Admin panel keys first, env vars as fallback.
+function aiConfig(s) {
+  const claude = s.ai.apiKey || process.env.ANTHROPIC_API_KEY || '';
+  const gemini = s.ai.geminiKey || process.env.GEMINI_API_KEY || '';
+  const model = s.ai.geminiModel || 'gemini-2.5-flash';
+  if (s.ai.provider === 'claude') return claude ? { provider: 'claude', key: claude } : gemini ? { provider: 'gemini', key: gemini, model } : null;
+  return gemini ? { provider: 'gemini', key: gemini, model } : claude ? { provider: 'claude', key: claude } : null;
+}
+const aiKey = (s) => Boolean(aiConfig(s));
 
 const invalidateSettings = () => { cache = { at: 0, data: null }; };
 
-module.exports = { getSettings, updateSettings, publicView, randomToken, invalidateSettings, aiKey };
+module.exports = { getSettings, updateSettings, publicView, randomToken, invalidateSettings, aiKey, aiConfig };

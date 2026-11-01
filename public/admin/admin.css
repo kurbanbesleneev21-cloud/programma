@@ -354,3 +354,11 @@
 .status--review { color: #ffd98a; border-color: #5a4a20; }
 @media (max-width: 680px) { .site-card { grid-template-columns: 1fr; } .site-card__pv { max-height: 160px; aspect-ratio: auto; height: 140px; } }
 .integ__logo--ai { font-size: 24px; color: #050505; background: linear-gradient(135deg, #f5d0b5, #d97757); }
+.integ__seg { display: inline-flex; flex-wrap: wrap; gap: 4px; padding: 4px; border-radius: 999px; border: 1px solid var(--border); width: fit-content; max-width: 100%; }
+.integ__seg input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.integ__seg span { display: block; padding: 8px 14px; border-radius: 999px; font-size: 13.5px; color: var(--muted); cursor: pointer; }
+.integ__seg input:checked + span { background: #fff; color: #050505; }
+.integ__seg input:focus-visible + span { outline: 2px solid #fff; outline-offset: 2px; }
+.integ__mini { display: grid; gap: 6px; margin-left: 18px; list-style: decimal; font-size: 14px; color: #cfcfcf; }
+.integ__mini a { text-decoration: underline; }
+.integ__way details summary { cursor: pointer; }

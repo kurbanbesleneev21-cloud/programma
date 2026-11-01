@@ -10,7 +10,7 @@ const { mediaUpload, persistMedia, UploadError } = require('./uploads');
 const telegram = require('./telegram');
 const config = require('./config');
 const aiSite = require('./ai-site');
-const { getSettings, updateSettings, aiKey, publicView } = require('./settings');
+const { getSettings, updateSettings, aiConfig, publicView } = require('./settings');
 
 const escHtml = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const HOUR = 60 * 60 * 1000;
@@ -197,12 +197,12 @@ function mountBuilder(app, api, d) {
   /* ---------- Claude: fill a site from its order ---------- */
   async function generateFor(store, site) {
     if (!site.order_number) throw new HttpError(400, 'Этот сайт создан не из заявки');
-    const key = aiKey(await getSettings(store));
-    if (!key) throw new HttpError(400, 'ИИ-генерация не настроена: добавьте ключ Claude API в админке → Интеграции');
+    const cfg = aiConfig(await getSettings(store));
+    if (!cfg) throw new HttpError(400, 'ИИ-генерация не настроена: добавьте ключ Gemini (бесплатно) или Claude API в админке → Интеграции');
     const order = await store.getOrderByNumber(site.order_number);
     if (!order) throw new HttpError(404, 'Заявка для этого сайта не найдена');
     let gen;
-    try { gen = await aiSite.generateWithClaude(order, key); } catch (err) {
+    try { gen = await aiSite.generate(order, cfg); } catch (err) {
       console.error('[ai-site]', err.status || '', err.message);
       throw new HttpError(502, aiSite.friendlyError(err));
     }
@@ -226,10 +226,27 @@ function mountBuilder(app, api, d) {
     res.json({ ok: true, site: sites.publicSite(await generateFor(req.store, site)) });
   }));
 
+  // Body may carry any of: provider, apiKey (Claude), geminiKey, geminiModel. '' clears a key.
   api.post('/ai', requireAdmin, wrap(async (req, res) => {
-    const apiKey = String((req.body || {}).apiKey || '').trim();
-    if (apiKey && !/^sk-ant-[\w-]{20,}$/.test(apiKey)) throw new HttpError(422, 'Ключ Claude API начинается с sk-ant-');
-    await updateSettings(req.store, (st) => { st.ai.apiKey = apiKey; });
+    const b = req.body || {};
+    const patch = {};
+    if ('apiKey' in b) {
+      patch.apiKey = String(b.apiKey || '').trim();
+      if (patch.apiKey && !/^sk-ant-[\w-]{20,}$/.test(patch.apiKey)) throw new HttpError(422, 'Ключ Claude API начинается с sk-ant-');
+    }
+    if ('geminiKey' in b) {
+      patch.geminiKey = String(b.geminiKey || '').trim();
+      if (patch.geminiKey && !/^[\w-]{30,60}$/.test(patch.geminiKey)) throw new HttpError(422, 'Ключ Gemini выглядит как AIza… (около 39 символов) — скопируйте его из Google AI Studio целиком');
+    }
+    if ('geminiModel' in b) {
+      patch.geminiModel = String(b.geminiModel || '').trim() || 'gemini-2.5-flash';
+      if (!/^[\w.-]{3,80}$/.test(patch.geminiModel)) throw new HttpError(422, 'Название модели: латиница, цифры, точки и дефисы');
+    }
+    if ('provider' in b) {
+      if (!['gemini', 'claude'].includes(b.provider)) throw new HttpError(422, 'Неизвестный провайдер');
+      patch.provider = b.provider;
+    }
+    await updateSettings(req.store, (st) => { Object.assign(st.ai, patch); });
     res.json(publicView(await getSettings(req.store), { origin: originOf(req) }));
   }));
 
