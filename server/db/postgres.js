@@ -130,9 +130,17 @@ async function createPostgresStore(connectionString) {
     connectionTimeoutMillis: 10_000,
     ssl,
   });
+  // An idle client dropped by the server (pooler restart, paused project) must not crash the function.
+  pool.on('error', (err) => console.error('[db] idle client error:', err.message));
   // Serialise schema creation (several serverless instances may cold-start at once).
   // A transaction-scoped lock is safe behind Supabase's transaction-mode pooler.
-  const client = await pool.connect();
+  let client;
+  try {
+    client = await pool.connect();
+  } catch (err) {
+    await pool.end().catch(() => {});
+    throw err;
+  }
   try {
     await client.query('BEGIN');
     await client.query('SELECT pg_advisory_xact_lock(7240117)');
@@ -140,10 +148,11 @@ async function createPostgresStore(connectionString) {
     await client.query('COMMIT');
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
-    throw err;
-  } finally {
     client.release();
+    await pool.end().catch(() => {});
+    throw err;
   }
+  client.release();
 
   function buildWhere({ q, status, service, budget }) {
     const clauses = [];
