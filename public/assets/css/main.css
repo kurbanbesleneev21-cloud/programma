@@ -1339,3 +1339,5 @@ body[data-cursor="0"] .cursor { display: none !important; }
 .autosite__row { display: flex; gap: 8px; }
 .autosite__row .input { min-width: 0; font-family: var(--font-mono); font-size: 12px; }
 @media (max-width: 680px) { .autosite__row { flex-direction: column; } }
+/* the custom cursor is for mouse-only devices: never on touch screens */
+@media (any-pointer: coarse) { .cursor { display: none !important; } }

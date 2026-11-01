@@ -802,13 +802,13 @@
               <h3>Google Gemini (бесплатный лимит)</h3>
               <ol class="integ__mini">
                 <li>Откройте <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> и войдите через Google-аккаунт.</li>
-                <li>Нажмите <b>Create API key</b> и скопируйте ключ (начинается с <code>AIza</code>).</li>
+                <li>Нажмите <b>Create API key</b> и скопируйте его кнопкой «Копировать ключ» (начинается с <code>AIza</code> или <code>AQ.</code>).</li>
                 <li>Вставьте ключ ниже и нажмите «Сохранить».</li>
               </ol>
               <p class="cms-hint">Бесплатно в пределах дневного лимита Google. На бесплатном тарифе Google может использовать тексты заявок для улучшения своих моделей. Из России сайт Google AI Studio может открываться только через VPN, сама генерация работает с сервера Vercel без VPN.</p>
               ${data.ai.geminiFromEnv ? '<p class="cms-hint cms-ok">Ключ задан в переменной окружения GEMINI_API_KEY.</p>' : ''}
               <form class="cms-form" data-ai-gemini>
-                <div class="cms-inline"><input class="input" name="geminiKey" placeholder="${data.ai.geminiKeyMasked ? `сохранён: ${esc(data.ai.geminiKeyMasked)}` : 'AIza…'}" autocomplete="off" spellcheck="false">
+                <div class="cms-inline"><input class="input" name="geminiKey" placeholder="${data.ai.geminiKeyMasked ? `сохранён: ${esc(data.ai.geminiKeyMasked)}` : 'AIza… или AQ.…'}" autocomplete="off" spellcheck="false">
                 <button class="btn btn--primary btn--sm" type="submit"><span class="btn__label">Сохранить</span><span class="btn__spinner" aria-hidden="true"></span></button>
                 ${data.ai.geminiKeyMasked ? '<button class="btn btn--ghost btn--sm" type="button" data-ai-clear="geminiKey"><span>Удалить</span></button>' : ''}</div>
                 <details><summary class="cms-hint">Модель (менять только если Google переименует)</summary>
