@@ -187,7 +187,7 @@
       { key: 'maintenance.text', label: 'Текст заглушки', type: 'textarea' },
     ] },
     { id: 'builder', title: '🌐 Сайты из заявок', fields: [
-      { key: 'builder.autoFromOrders', label: 'Автоматически создавать сайт по заявке', type: 'bool', hint: 'Когда клиент заказывает «Разработку сайта» или «Интернет-магазин», система сразу собирает ему сайт по его описанию. С ключом Claude API (Интеграции) тексты пишет ИИ, без ключа сайт собирается из данных заявки.' },
+      { key: 'builder.autoFromOrders', label: 'Автоматически создавать сайт по заявке', type: 'bool', hint: 'Когда клиент заказывает «Разработку сайта» или «Интернет-магазин», система сразу собирает ему сайт по его описанию. С ключом ИИ (Интеграции: бесплатный Gemini или Claude) тексты пишет ИИ, без ключа сайт собирается из данных заявки.' },
       { key: 'builder.publishImmediately', label: 'Публиковать такие сайты сразу, без оплаты', type: 'bool', hint: 'Выключено: сайт — черновик с плашкой «предпросмотр», вы публикуете его в разделе «Сайты клиентов».' },
       { group: 'Отдельный конструктор /create (необязательно)', hint: 'Страница, где клиент сам собирает сайт по шагам. В меню сайта не показывается.' },
       { key: 'builder.enabled', label: 'Страница /create включена', type: 'bool' },
@@ -712,7 +712,7 @@
           try { await navigator.clipboard.writeText(editUrl); A().toast('Ссылка скопирована — отправьте её клиенту'); } catch { prompt('Ссылка для клиента:', editUrl); }
           return;
         } else if (act === 'ai') {
-          if (!confirm('Claude заново напишет тексты, услуги и подберёт цвета по описанию из заявки. Ручные правки текстов будут заменены. Продолжить?')) return;
+          if (!confirm('ИИ заново напишет тексты, услуги и подберёт цвета по описанию из заявки. Ручные правки текстов будут заменены. Продолжить?')) return;
           b.classList.add('is-loading'); b.querySelector('span').textContent = 'Генерация…';
           await A().api(`/sites/${id}/generate`, { method: 'POST' });
           A().toast('Сайт пересоздан');
@@ -792,15 +792,40 @@
         <div>
           <section class="panel-card integ">
             <div class="integ__head"><span class="integ__logo integ__logo--ai" aria-hidden="true">✦</span>
-              <div><h2>ИИ-генерация сайтов (Claude)</h2><p class="cms-muted">По описанию из заявки ИИ сам пишет сайт клиенту: шаблон, тексты, услуги, цены и цвета.</p></div>
+              <div><h2>ИИ-генерация сайтов</h2><p class="cms-muted">По описанию из заявки ИИ сам пишет клиенту сайт: шаблон, тексты, услуги, цены и цвета.</p></div>
               <span class="status ${data.ai.configured ? 'status--in_progress' : 'status--off'}">${data.ai.configured ? 'включена' : 'выключена'}</span></div>
-            <p class="cms-hint">Ключ создаётся на <a href="https://platform.claude.com/settings/keys" target="_blank" rel="noopener">platform.claude.com → API Keys</a>. Пополните баланс там же; генерация одного сайта стоит несколько центов. Без ключа сайт всё равно создаётся, но тексты берутся прямо из заявки.</p>
-            ${data.ai.fromEnv ? '<p class="cms-hint cms-ok">Ключ задан в переменной окружения ANTHROPIC_API_KEY.</p>' : ''}
-            <form class="cms-inline" data-ai-key>
-              <input class="input" name="apiKey" placeholder="${data.ai.keyMasked ? `сохранён: ${esc(data.ai.keyMasked)}` : 'sk-ant-…'}" autocomplete="off" spellcheck="false">
-              <button class="btn btn--primary btn--sm" type="submit"><span class="btn__label">Сохранить</span><span class="btn__spinner" aria-hidden="true"></span></button>
-              ${data.ai.keyMasked ? '<button class="btn btn--ghost btn--sm" type="button" data-ai-clear><span>Удалить ключ</span></button>' : ''}
-            </form>
+            <div class="bld-seg integ__seg" role="radiogroup" aria-label="Какой ИИ использовать">
+              <label><input type="radio" name="ai-provider" value="gemini" ${data.ai.provider !== 'claude' ? 'checked' : ''}><span>Google Gemini — бесплатно</span></label>
+              <label><input type="radio" name="ai-provider" value="claude" ${data.ai.provider === 'claude' ? 'checked' : ''}><span>Claude — платно</span></label>
+            </div>
+            <div class="integ__way" data-ai-pane="gemini" ${data.ai.provider === 'claude' ? 'hidden' : ''}>
+              <h3>Google Gemini (бесплатный лимит)</h3>
+              <ol class="integ__mini">
+                <li>Откройте <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> и войдите через Google-аккаунт.</li>
+                <li>Нажмите <b>Create API key</b> и скопируйте ключ (начинается с <code>AIza</code>).</li>
+                <li>Вставьте ключ ниже и нажмите «Сохранить».</li>
+              </ol>
+              <p class="cms-hint">Бесплатно в пределах дневного лимита Google. На бесплатном тарифе Google может использовать тексты заявок для улучшения своих моделей. Из России сайт Google AI Studio может открываться только через VPN, сама генерация работает с сервера Vercel без VPN.</p>
+              ${data.ai.geminiFromEnv ? '<p class="cms-hint cms-ok">Ключ задан в переменной окружения GEMINI_API_KEY.</p>' : ''}
+              <form class="cms-form" data-ai-gemini>
+                <div class="cms-inline"><input class="input" name="geminiKey" placeholder="${data.ai.geminiKeyMasked ? `сохранён: ${esc(data.ai.geminiKeyMasked)}` : 'AIza…'}" autocomplete="off" spellcheck="false">
+                <button class="btn btn--primary btn--sm" type="submit"><span class="btn__label">Сохранить</span><span class="btn__spinner" aria-hidden="true"></span></button>
+                ${data.ai.geminiKeyMasked ? '<button class="btn btn--ghost btn--sm" type="button" data-ai-clear="geminiKey"><span>Удалить</span></button>' : ''}</div>
+                <details><summary class="cms-hint">Модель (менять только если Google переименует)</summary>
+                  <div class="cms-inline"><input class="input" name="geminiModel" value="${esc(data.ai.geminiModel)}" spellcheck="false"><button class="btn btn--ghost btn--sm" type="button" data-ai-model><span>Сохранить модель</span></button></div></details>
+              </form>
+            </div>
+            <div class="integ__way" data-ai-pane="claude" ${data.ai.provider === 'claude' ? '' : 'hidden'}>
+              <h3>Claude (Anthropic)</h3>
+              <p class="cms-hint">Тексты получаются качественнее, но генерация платная: ключ создаётся на <a href="https://platform.claude.com/settings/keys" target="_blank" rel="noopener">platform.claude.com → API Keys</a>, баланс пополняется там же.</p>
+              ${data.ai.fromEnv ? '<p class="cms-hint cms-ok">Ключ задан в переменной окружения ANTHROPIC_API_KEY.</p>' : ''}
+              <form class="cms-inline" data-ai-key>
+                <input class="input" name="apiKey" placeholder="${data.ai.keyMasked ? `сохранён: ${esc(data.ai.keyMasked)}` : 'sk-ant-…'}" autocomplete="off" spellcheck="false">
+                <button class="btn btn--primary btn--sm" type="submit"><span class="btn__label">Сохранить</span><span class="btn__spinner" aria-hidden="true"></span></button>
+                ${data.ai.keyMasked ? '<button class="btn btn--ghost btn--sm" type="button" data-ai-clear="apiKey"><span>Удалить</span></button>' : ''}
+              </form>
+            </div>
+            <p class="cms-hint">Без ключа сайт всё равно создаётся по заявке, но тексты берутся прямо из неё.</p>
           </section>
           <section class="panel-card integ">
             <div class="integ__head"><span class="integ__logo integ__logo--g" aria-hidden="true"><svg viewBox="0 0 24 24"><path fill="#4285F4" d="M22.5 12.3c0-.8-.1-1.5-.2-2.3H12v4.3h5.9a5 5 0 0 1-2.2 3.3v2.7h3.6c2-1.9 3.2-4.7 3.2-8z"/><path fill="#34A853" d="M12 23c3 0 5.5-1 7.3-2.7l-3.6-2.7c-1 .7-2.2 1-3.7 1-2.9 0-5.3-1.9-6.2-4.5H2.1v2.8A11 11 0 0 0 12 23z"/><path fill="#FBBC05" d="M5.8 14.1a6.6 6.6 0 0 1 0-4.2V7.1H2.1a11 11 0 0 0 0 9.8z"/><path fill="#EA4335" d="M12 5.4c1.6 0 3.1.6 4.2 1.7l3.2-3.2A11 11 0 0 0 2.1 7.1l3.7 2.8C6.7 7.3 9.1 5.4 12 5.4z"/></svg></span>
@@ -849,16 +874,21 @@
     const copy = async (text) => { try { await navigator.clipboard.writeText(text); A().toast('Скопировано'); } catch { prompt('Скопируйте:', text); } };
     const cl = $('[data-copy-link]', r); cl && cl.addEventListener('click', () => copy(t.linkUrl));
     $('[data-copy-uri]', r).addEventListener('click', () => copy(g.redirectUri));
-    const aiSave = async (apiKey, btn) => {
+    const aiSave = async (body, btn, msg) => {
       try {
         btn && btn.classList.add('is-loading');
-        drawIntegrations(await A().api('/ai', { method: 'POST', body: { apiKey } }));
-        A().toast(apiKey ? 'Ключ Claude сохранён' : 'Ключ удалён');
+        drawIntegrations(await A().api('/ai', { method: 'POST', body }));
+        A().toast(msg);
       } catch (err) { A().fail(err); } finally { btn && btn.classList.remove('is-loading'); }
     };
-    $('[data-ai-key]', r).addEventListener('submit', (e) => { e.preventDefault(); if (e.target.apiKey.value.trim()) aiSave(e.target.apiKey.value.trim(), e.submitter); });
-    const aiClear = $('[data-ai-clear]', r);
-    aiClear && aiClear.addEventListener('click', () => { if (confirm('Удалить ключ Claude API?')) aiSave('', aiClear); });
+    r.querySelectorAll('input[name=ai-provider]').forEach((rb) => rb.addEventListener('change', () => {
+      r.querySelectorAll('[data-ai-pane]').forEach((p) => { p.hidden = p.dataset.aiPane !== rb.value; });
+      aiSave({ provider: rb.value }, null, rb.value === 'gemini' ? 'Сайты будет писать Gemini' : 'Сайты будет писать Claude');
+    }));
+    $('[data-ai-gemini]', r).addEventListener('submit', (e) => { e.preventDefault(); const v = e.target.geminiKey.value.trim(); if (v) aiSave({ geminiKey: v, provider: 'gemini' }, e.submitter, 'Ключ Gemini сохранён'); });
+    $('[data-ai-model]', r).addEventListener('click', (e) => aiSave({ geminiModel: $('[data-ai-gemini]', r).geminiModel.value.trim() }, e.currentTarget, 'Модель сохранена'));
+    $('[data-ai-key]', r).addEventListener('submit', (e) => { e.preventDefault(); const v = e.target.apiKey.value.trim(); if (v) aiSave({ apiKey: v, provider: 'claude' }, e.submitter, 'Ключ Claude сохранён'); });
+    r.querySelectorAll('[data-ai-clear]').forEach((b) => b.addEventListener('click', () => { if (confirm('Удалить ключ?')) aiSave({ [b.dataset.aiClear]: '' }, b, 'Ключ удалён'); }));
     $('[data-google]', r).addEventListener('submit', (e) => {
       e.preventDefault();
       const f = e.target;

@@ -21,12 +21,20 @@ Object.assign(process.env, {
   NODE_ENV: 'test',
 });
 delete process.env.ANTHROPIC_API_KEY;
+delete process.env.GEMINI_API_KEY;
+const geminiCalls = [];
+let geminiReply = null, geminiStatus = 200;
 
 const realFetch = globalThis.fetch;
 const claudeCalls = [];
 let claudeReply = null;
 globalThis.fetch = async (url, opts = {}) => {
   const u = String(url instanceof Request ? url.url : url);
+  if (u.startsWith('https://generativelanguage.googleapis.com/')) {
+    geminiCalls.push({ url: u, body: JSON.parse(opts.body), key: new Headers(opts.headers).get('x-goog-api-key') });
+    if (geminiStatus !== 200) return new Response(JSON.stringify({ error: { code: geminiStatus, message: 'quota exceeded' } }), { status: geminiStatus, headers: { 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify({ candidates: [{ content: { role: 'model', parts: [{ text: JSON.stringify(geminiReply) }] }, finishReason: 'STOP' }] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }
   if (!u.startsWith('https://api.anthropic.com/')) return realFetch(url, opts);
   const body = JSON.parse(opts.body || (url instanceof Request ? await url.text() : '{}'));
   const headers = new Headers(opts.headers || (url instanceof Request ? url.headers : {}));
@@ -96,7 +104,7 @@ test('a website order instantly gets a draft site built from the order (no AI ke
   // without a key generation explains what to do
   const gen = await fetch(`${base}/api/sites/${data.site.slug}/generate`, { method: 'POST', headers: { cookie, 'Content-Type': 'application/json' }, body: '{}' });
   assert.equal(gen.status, 400);
-  assert.match((await gen.json()).error, /ключ Claude API/);
+  assert.match((await gen.json()).error, /ключ Gemini \(бесплатно\) или Claude API/);
 
   // the admin sees the site in the order
   const o = (await (await admin('/orders?q=' + encodeURIComponent(data.number))).json()).items[0];
@@ -160,4 +168,40 @@ test('with a Claude key the site is written by Claude', async () => {
   const bad = await admin(`/sites/${site.id}/generate`, 'POST');
   assert.equal(bad.status, 502);
   assert.match((await bad.json()).error, /Неверный ключ Claude API/);
+});
+
+test('free Gemini writes the site when its key is set (preferred over Claude)', async () => {
+  assert.equal((await admin('/ai', 'POST', { geminiKey: 'short' })).status, 422);
+  const saved = await (await admin('/ai', 'POST', { provider: 'gemini', geminiKey: 'AIzaSyTestKey0123456789abcdefghijklmnop', geminiModel: 'gemini-2.5-flash' })).json();
+  assert.equal(saved.ai.provider, 'gemini');
+  assert.equal(saved.ai.configured, true);
+  assert.ok(!JSON.stringify(saved).includes('AIzaSyTestKey0123456789abcdefghijklmnop'));
+
+  const { data, cookie } = await order(['website'], { project_name: 'Йога Студия Лотос', description: 'Сайт для студии йоги: расписание, тренеры, цены на абонементы.' });
+  assert.equal(data.site.ai, true);
+  geminiReply = { template: 'business', title: 'Студия йоги «Лотос»', tagline: 'Йога для начинающих и практикующих', about: 'Абзац.', cta: 'Записаться',
+    items: [{ title: 'Хатха-йога', text: 'Спокойная практика.', price: '800 ₽' }], theme: 'light', accent: '#16a34a' };
+  geminiCalls.length = 0;
+  const before = claudeCalls.length;
+  const gen = await fetch(`${base}/api/sites/${data.site.slug}/generate`, { method: 'POST', headers: { cookie, 'Content-Type': 'application/json' }, body: '{}' });
+  assert.equal(gen.status, 200);
+  assert.equal(claudeCalls.length, before, 'Claude is not called when Gemini is selected');
+  const call = geminiCalls[0];
+  assert.match(call.url, /models\/gemini-2\.5-flash:generateContent$/);
+  assert.equal(call.key, 'AIzaSyTestKey0123456789abcdefghijklmnop');
+  assert.equal(call.body.generationConfig.responseMimeType, 'application/json');
+  assert.match(call.body.contents[0].parts[0].text, /Йога Студия Лотос/);
+  const html = await (await fetch(`${base}/s/${data.site.slug}`)).text();
+  assert.match(html, /Студия йоги «Лотос»/);
+  assert.match(html, /--accent:#16a34a/);
+
+  // quota errors are explained; malformed output is rejected
+  geminiStatus = 429;
+  const site = (await (await admin('/sites')).json()).items.find((x) => x.slug === data.site.slug);
+  const q = await admin(`/sites/${site.id}/generate`, 'POST');
+  assert.equal(q.status, 502);
+  assert.match((await q.json()).error, /лимит Gemini/);
+  geminiStatus = 200;
+  geminiReply = { nope: true };
+  assert.match((await (await admin(`/sites/${site.id}/generate`, 'POST')).json()).error, /не по схеме/);
 });

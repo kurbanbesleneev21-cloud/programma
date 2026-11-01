@@ -121,6 +121,67 @@ async function generateWithClaude(order, apiKey) {
   return response.parsed_output;
 }
 
+/* ---------- Google Gemini (free tier) ---------- */
+// Plain REST: no extra dependency. The schema mirrors SiteSchema in Gemini's OpenAPI subset.
+const GEMINI_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    template: { type: 'STRING', enum: ['business', 'card', 'portfolio', 'cafe'] },
+    title: { type: 'STRING' },
+    tagline: { type: 'STRING' },
+    about: { type: 'STRING' },
+    cta: { type: 'STRING' },
+    items: { type: 'ARRAY', items: { type: 'OBJECT', properties: { title: { type: 'STRING' }, text: { type: 'STRING' }, price: { type: 'STRING' } }, required: ['title', 'text', 'price'] } },
+    theme: { type: 'STRING', enum: ['dark', 'light'] },
+    accent: { type: 'STRING' },
+  },
+  required: ['template', 'title', 'tagline', 'about', 'cta', 'items', 'theme', 'accent'],
+};
+
+class AiError extends Error {
+  constructor(message, status) { super(message); this.aiStatus = status; }
+}
+
+async function generateWithGemini(order, apiKey, model = 'gemini-2.5-flash') {
+  let res;
+  try {
+    res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: SYSTEM }] },
+        contents: [{ role: 'user', parts: [{ text: orderPrompt(order) }] }],
+        generationConfig: { responseMimeType: 'application/json', responseSchema: GEMINI_SCHEMA, temperature: 0.7 },
+      }),
+      signal: AbortSignal.timeout(50_000),
+    });
+  } catch (err) {
+    throw new AiError(err.name === 'TimeoutError' ? 'Gemini не ответил вовремя' : 'Нет соединения с Gemini', 0);
+  }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const msg = (data.error && data.error.message) || '';
+    if (res.status === 400 && /api key/i.test(msg)) throw new AiError('Неверный ключ Gemini — проверьте его в админке → Интеграции', 400);
+    if (res.status === 403) throw new AiError('Ключ Gemini не имеет доступа (проверьте ключ в Google AI Studio)', 403);
+    if (res.status === 404) throw new AiError(`Модель «${model}» не найдена — укажите другую модель Gemini в админке → Интеграции`, 404);
+    if (res.status === 429) throw new AiError('Бесплатный лимит Gemini исчерпан — попробуйте позже', 429);
+    throw new AiError(`Gemini: ошибка ${res.status}${msg ? ` — ${msg.slice(0, 160)}` : ''}`, res.status);
+  }
+  const cand = data.candidates && data.candidates[0];
+  const text = cand && cand.content && Array.isArray(cand.content.parts) ? cand.content.parts.map((p) => p.text || '').join('') : '';
+  if (!text) throw new AiError(cand && cand.finishReason === 'SAFETY' ? 'Gemini отказался обрабатывать эту заявку' : 'Gemini вернул пустой ответ', 502);
+  let parsed;
+  try { parsed = JSON.parse(text.replace(/^```(?:json)?\s*|\s*```$/g, '')); } catch { throw new AiError('Gemini вернул ответ не в формате JSON', 502); }
+  const checked = SiteSchema.safeParse(parsed);
+  if (!checked.success) throw new AiError('Gemini вернул ответ не по схеме', 502);
+  return checked.data;
+}
+
+// Generates with whichever AI is configured: { provider: 'gemini'|'claude', key, model? }.
+function generate(order, cfg) {
+  return cfg.provider === 'claude' ? generateWithClaude(order, cfg.key) : generateWithGemini(order, cfg.key, cfg.model);
+}
+
 // Merges Claude's content with the contacts and photos the site already has.
 function applyGenerated(site, gen) {
   const data = sites.normalizeData({
@@ -136,6 +197,7 @@ function applyGenerated(site, gen) {
 }
 
 function friendlyError(err) {
+  if (err instanceof AiError) return err.message;
   if (err instanceof AnthropicClient.AuthenticationError) return 'Неверный ключ Claude API — проверьте его в админке → Интеграции';
   if (err instanceof AnthropicClient.PermissionDeniedError) return 'У ключа Claude API нет доступа к модели';
   if (err instanceof AnthropicClient.RateLimitError) return 'Claude API перегружен или закончился лимит — попробуйте позже';
@@ -145,4 +207,4 @@ function friendlyError(err) {
   return err.message || 'Не удалось сгенерировать сайт';
 }
 
-module.exports = { wantsSite, draftFromOrder, guessTemplate, uniqueSlug, generateWithClaude, applyGenerated, friendlyError, MODEL };
+module.exports = { wantsSite, draftFromOrder, guessTemplate, uniqueSlug, generate, generateWithClaude, generateWithGemini, applyGenerated, friendlyError, MODEL };
