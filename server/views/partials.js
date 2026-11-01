@@ -158,6 +158,7 @@ function navLinks(c, home) {
   if (c.about.enabled) links.push(['about', 'О нас', `${p}#about`]);
   if (c.pricing && c.pricing.enabled && c.pricing.items.length) links.push(['pricing', 'Цены', `${p}#pricing`]);
   links.push(['contacts', 'Контакты', '#contacts']);
+  if (c.builder && c.builder.enabled && c.builder.navLabel) links.push(['create', c.builder.navLabel, '/create']);
   return links;
 }
 

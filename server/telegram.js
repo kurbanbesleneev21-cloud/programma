@@ -207,6 +207,14 @@ async function notifyOrder(store, order, filesCount, origin, legacyChatId = '') 
   return { sent: results.length - failed.length };
 }
 
+// Plain HTML message to every linked admin chat (used by the site builder).
+async function notifyText(store, html) {
+  const { token, chatIds } = await activeBot(store);
+  if (!token || !chatIds.length) return { skipped: true };
+  await Promise.allSettled(chatIds.map((id) => tg(token, 'sendMessage', { chat_id: id, text: html, parse_mode: 'HTML', disable_web_page_preview: true })));
+  return { sent: true };
+}
+
 /* ---------- Webhook: updates from Telegram ---------- */
 async function handleUpdate(store, update, { origin }) {
   const s = await getSettings(store);
@@ -291,5 +299,5 @@ async function handleUpdate(store, update, { origin }) {
 
 module.exports = {
   tg, TelegramError, activeBot, connectBot, disconnectBot, regenerateLink, addChatById, removeChat, setPhone, setStatusButtons,
-  detectChats, sendTest, notifyOrder, handleUpdate, samePhone, statusKeyboard,
+  detectChats, sendTest, notifyOrder, notifyText, handleUpdate, samePhone, statusKeyboard,
 };

@@ -96,4 +96,24 @@ async function notifyNewOrder(order, filesCount, { origin, settings, store }, lo
   if (mail.status === 'rejected') log.error(`[notify] email failed for ${order.number}:`, mail.reason.message);
 }
 
-module.exports = { notifyNewOrder };
+// Link to the client's site cabinet (the only way back in, so it is worth e-mailing).
+async function sendSiteEmail(site, editUrl, origin) {
+  const transport = getTransport();
+  if (!transport || !site.owner_email) return { skipped: true };
+  const siteUrl = `${origin}/s/${site.slug}`;
+  await transport.sendMail({
+    from: config.smtp.from,
+    to: site.owner_email,
+    subject: `Ваш сайт «${site.data.title}» создан`,
+    text: `Здравствуйте, ${site.owner_name}!\n\nВаш сайт: ${siteUrl}\n\nРедактировать сайт (сохраните это письмо, ссылка личная): ${editUrl}\n${site.status === 'active' ? '' : '\nСейчас сайт открыт в режиме предпросмотра и будет опубликован после оплаты.\n'}`,
+    html: `<div style="font-family:Arial,sans-serif;font-size:15px;color:#111;line-height:1.6">
+      <p>Здравствуйте, ${escHtml(site.owner_name)}!</p>
+      <p>Ваш сайт «${escHtml(site.data.title)}» создан: <a href="${escHtml(siteUrl)}">${escHtml(siteUrl)}</a></p>
+      <p><a href="${escHtml(editUrl)}" style="display:inline-block;padding:12px 22px;border-radius:999px;background:#111;color:#fff;text-decoration:none">Редактировать сайт</a></p>
+      <p style="color:#666">Сохраните это письмо: ссылка выше — личный доступ к редактированию, не пересылайте её.</p>
+      ${site.status === 'active' ? '' : '<p>Сейчас сайт открыт в режиме предпросмотра и будет опубликован после оплаты.</p>'}</div>`,
+  });
+  return { sent: true };
+}
+
+module.exports = { notifyNewOrder, sendSiteEmail };
