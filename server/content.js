@@ -199,7 +199,8 @@ const DEFAULTS = {
   },
   analytics: { yandexMetrika: '', googleAnalytics: '' },
   builder: {
-    enabled: true,
+    autoFromOrders: true,      // an order for a website/shop instantly gets its own draft site
+    enabled: false,            // the separate /create wizard (hidden by default)
     navLabel: 'Создать сайт',
     title: 'Создайте свой сайт за 5 минут',
     subtitle: 'Выберите шаблон, заполните анкету и загрузите фото — сайт появится сразу. Править его можно в личном кабинете.',

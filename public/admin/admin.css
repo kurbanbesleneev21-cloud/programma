@@ -353,3 +353,4 @@
 .site-card__owner a { text-decoration: underline; }
 .status--review { color: #ffd98a; border-color: #5a4a20; }
 @media (max-width: 680px) { .site-card { grid-template-columns: 1fr; } .site-card__pv { max-height: 160px; aspect-ratio: auto; height: 140px; } }
+.integ__logo--ai { font-size: 24px; color: #050505; background: linear-gradient(135deg, #f5d0b5, #d97757); }

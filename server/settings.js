@@ -25,6 +25,9 @@ const DEFAULTS = {
     clientSecret: '',
     allowedEmails: [],
   },
+  ai: {
+    apiKey: '',          // Claude API key for generating client sites from orders
+  },
 };
 
 const clone = (o) => JSON.parse(JSON.stringify(o));
@@ -94,9 +97,17 @@ function publicView(s, { origin } = {}) {
       allowedEmails: s.google.allowedEmails,
       redirectUri: origin ? `${origin}/api/admin/google/callback` : '',
     },
+    ai: {
+      configured: Boolean(s.ai.apiKey || process.env.ANTHROPIC_API_KEY),
+      keyMasked: mask(s.ai.apiKey),
+      fromEnv: !s.ai.apiKey && Boolean(process.env.ANTHROPIC_API_KEY),
+    },
   };
 }
 
+// Claude key: admin panel first, ANTHROPIC_API_KEY env var as fallback.
+const aiKey = (s) => s.ai.apiKey || process.env.ANTHROPIC_API_KEY || '';
+
 const invalidateSettings = () => { cache = { at: 0, data: null }; };
 
-module.exports = { getSettings, updateSettings, publicView, randomToken, invalidateSettings };
+module.exports = { getSettings, updateSettings, publicView, randomToken, invalidateSettings, aiKey };

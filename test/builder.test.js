@@ -59,6 +59,10 @@ before(async () => {
   base = `http://127.0.0.1:${server.address().port}`;
   const login = await post('/api/admin/login', { username: 'admin', password: 'correct-horse-battery' });
   adminCookie = cookieOf(login);
+  // the separate /create wizard is off by default — switch it on for these tests
+  const { content } = await (await fetch(`${base}/api/admin/content`, { headers: { cookie: adminCookie } })).json();
+  content.builder.enabled = true;
+  await fetch(`${base}/api/admin/content`, { method: 'PUT', headers: { cookie: adminCookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ content }) });
 });
 
 after(async () => {
@@ -71,7 +75,7 @@ test('wizard page and slug checks', async () => {
   const page = await fetch(`${base}/create`);
   assert.equal(page.status, 200);
   assert.match(await page.text(), /data-builder/);
-  assert.match(await (await fetch(base)).text(), /href="\/create"/, 'menu links to the builder');
+  assert.doesNotMatch(await (await fetch(base)).text(), /href="\/create"/, 'the menu stays as before');
   assert.deepEqual(await (await fetch(`${base}/api/sites/check-slug?slug=admin`)).json(), { ok: false, error: 'Этот адрес зарезервирован, выберите другой' });
   assert.equal((await (await fetch(`${base}/api/sites/check-slug?slug=a`)).json()).ok, false);
   assert.equal((await (await fetch(`${base}/api/sites/check-slug?slug=my-new-site`)).json()).ok, true);

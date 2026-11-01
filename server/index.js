@@ -13,8 +13,10 @@ const { upload, mediaUpload, persistFiles, persistMedia, describeMedia, verifyDi
 const { storage } = require('./storage');
 const { notifyNewOrder, sendSiteEmail } = require('./notify');
 const { mountBuilder } = require('./builder-routes');
+const sitesLib = require('./sites');
+const aiSite = require('./ai-site');
 const { DEFAULTS, normalize, getContent, saveContent, invalidateContent } = require('./content');
-const { getSettings, updateSettings, publicView } = require('./settings');
+const { getSettings, updateSettings, publicView, aiKey } = require('./settings');
 const telegram = require('./telegram');
 const google = require('./google');
 const { ICONS } = require('./views/icons');
@@ -212,11 +214,44 @@ function createApp({ store: injected } = {}) {
         const n = req.siteContent.notifications;
         // On serverless the function may freeze right after responding, so notifications are awaited (with timeouts).
         await notifyNewOrder({ ...order, id: saved.id }, files.length, { origin: originOf(req), settings: n, store });
+
+        // A website/shop order instantly gets its own draft site; Claude then fills it in (separate request).
+        let site = null;
+        if (req.siteContent.builder.autoFromOrders && aiSite.wantsSite(order)) {
+          try {
+            const editToken = sitesLib.newToken();
+            const draft = aiSite.draftFromOrder(order);
+            const created = await store.createSite({
+              slug: await aiSite.uniqueSlug(store, order.project_name),
+              template: aiSite.guessTemplate(`${order.project_name} ${order.description}`),
+              data: draft,
+              status: req.siteContent.builder.publishImmediately ? 'active' : 'draft',
+              owner_name: order.name, owner_email: order.email, owner_phone: order.phone,
+              token_hash: sitesLib.hashToken(editToken),
+              ip_hash: order.ip_hash,
+              order_number: saved.number,
+            });
+            const st = await getSettings(store);
+            const origin = originOf(req);
+            site = {
+              slug: created.slug,
+              url: `${origin}/s/${created.slug}`,
+              editUrl: `${origin}/s/${created.slug}/edit#key=${editToken}`,
+              status: created.status,
+              ai: Boolean(aiKey(st)),
+            };
+            res.set('Set-Cookie', sitesLib.siteCookie(sec.parseCookies(req.get('cookie'))[sitesLib.SITE_COOKIE], created));
+          } catch (err) {
+            console.error('[order] auto site failed:', err.message); // the order itself is already saved
+          }
+        }
+
         res.status(201).json({
           ok: true,
           number: saved.number,
           created_at: saved.created_at,
           confirmation_sent: Boolean(config.smtp.host && config.smtp.from && n.clientConfirmation),
+          site,
         });
       } catch (err) {
         await removeFiles(files.map((f) => f.storedName));
@@ -355,7 +390,8 @@ function createApp({ store: injected } = {}) {
   api.get('/orders/:id', requireAdmin, wrap(async (req, res) => {
     const order = await req.store.getOrder(idParam(req.params.id));
     if (!order) throw new HttpError(404, 'Заявка не найдена');
-    res.json(order);
+    const site = await req.store.getSiteByOrder(order.number);
+    res.json({ ...order, site: site ? { id: site.id, slug: site.slug, status: site.status, title: site.data.title } : null });
   }));
 
   api.patch('/orders/:id', requireAdmin, wrap(async (req, res) => {

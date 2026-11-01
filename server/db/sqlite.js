@@ -128,6 +128,9 @@ function createSqliteStore(dataDir) {
   const db = new DatabaseSync(path.join(dataDir, 'codeforge.sqlite'));
   db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
   db.exec(SCHEMA);
+  // Later columns (no IF NOT EXISTS for ALTER in SQLite).
+  const siteCols = db.prepare('PRAGMA table_info(sites)').all().map((c) => c.name);
+  if (!siteCols.includes('order_number')) db.exec("ALTER TABLE sites ADD COLUMN order_number TEXT NOT NULL DEFAULT ''");
 
   const insertOrder = db.prepare(
     `INSERT INTO orders (${ORDER_COLUMNS.join(', ')}) VALUES (${ORDER_COLUMNS.map(() => '?').join(', ')})`
@@ -233,12 +236,14 @@ function createSqliteStore(dataDir) {
     async createSite(site) {
       const now = new Date().toISOString();
       const { lastInsertRowid } = db.prepare(
-        'INSERT INTO sites (slug, status, template, data, owner_name, owner_email, owner_phone, token_hash, ip_hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-      ).run(site.slug, site.status, site.template, JSON.stringify(site.data), site.owner_name, site.owner_email, site.owner_phone, site.token_hash, site.ip_hash || '', now, now);
+        'INSERT INTO sites (slug, status, template, data, owner_name, owner_email, owner_phone, token_hash, ip_hash, order_number, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      ).run(site.slug, site.status, site.template, JSON.stringify(site.data), site.owner_name, site.owner_email, site.owner_phone, site.token_hash, site.ip_hash || '', site.order_number || '', now, now);
       return this.getSite(Number(lastInsertRowid));
     },
     async getSite(id) { return siteRow(db.prepare('SELECT * FROM sites WHERE id = ?').get(id)); },
     async getSiteBySlug(slug) { return siteRow(db.prepare('SELECT * FROM sites WHERE slug = ?').get(slug)); },
+    async getSiteByOrder(number) { return number ? siteRow(db.prepare('SELECT * FROM sites WHERE order_number = ? ORDER BY id DESC LIMIT 1').get(number)) : null; },
+    async getOrderByNumber(number) { const r = db.prepare('SELECT id FROM orders WHERE number = ?').get(number); return r ? this.getOrder(Number(r.id)) : null; },
     async listSites({ limit = 200 } = {}) { return db.prepare('SELECT * FROM sites ORDER BY id DESC LIMIT ?').all(limit).map(siteRow); },
     async updateSite(id, patch) {
       const cols = ['status', 'template', 'data', 'owner_name', 'owner_email', 'owner_phone', 'token_hash', 'paid_at'].filter((k) => k in patch);

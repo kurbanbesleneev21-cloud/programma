@@ -186,13 +186,14 @@
       { key: 'maintenance.title', label: 'Заголовок заглушки' },
       { key: 'maintenance.text', label: 'Текст заглушки', type: 'textarea' },
     ] },
-    { id: 'builder', title: '🌐 Конструктор сайтов', anchor: 'create', fields: [
-      { key: 'builder.enabled', label: 'Конструктор сайтов включён (страница /create)', type: 'bool' },
-      { key: 'builder.navLabel', label: 'Пункт в меню сайта (пусто — не показывать)' },
+    { id: 'builder', title: '🌐 Сайты из заявок', fields: [
+      { key: 'builder.autoFromOrders', label: 'Автоматически создавать сайт по заявке', type: 'bool', hint: 'Когда клиент заказывает «Разработку сайта» или «Интернет-магазин», система сразу собирает ему сайт по его описанию. С ключом Claude API (Интеграции) тексты пишет ИИ, без ключа сайт собирается из данных заявки.' },
+      { key: 'builder.publishImmediately', label: 'Публиковать такие сайты сразу, без оплаты', type: 'bool', hint: 'Выключено: сайт — черновик с плашкой «предпросмотр», вы публикуете его в разделе «Сайты клиентов».' },
+      { group: 'Отдельный конструктор /create (необязательно)', hint: 'Страница, где клиент сам собирает сайт по шагам. В меню сайта не показывается.' },
+      { key: 'builder.enabled', label: 'Страница /create включена', type: 'bool' },
       { key: 'builder.title', label: 'Заголовок страницы конструктора' },
       { key: 'builder.subtitle', label: 'Подзаголовок', type: 'textarea' },
       { key: 'builder.priceNote', label: 'Текст об оплате перед кнопкой «Создать сайт»', type: 'textarea' },
-      { key: 'builder.publishImmediately', label: 'Публиковать сайты сразу, без оплаты', type: 'bool', hint: 'Выключено: новый сайт — черновик с плашкой «предпросмотр», вы публикуете его в разделе «Сайты клиентов». После подключения оплаты публикация будет автоматической.' },
       { group: 'Сайты клиентов', link: ['#/sites', 'Открыть список сайтов →'] },
     ] },
     { id: 'seo', title: 'SEO и соцсети', fields: [
@@ -675,7 +676,7 @@
           <div class="site-card__body">
             <div class="site-card__top"><h3>${esc(x.data.title)}</h3><span class="status ${st[x.status]}">${esc(data.statuses[x.status])}</span></div>
             <a class="site-card__url" href="/s/${esc(x.slug)}" target="_blank" rel="noopener">/s/${esc(x.slug)} ↗</a>
-            <p class="cms-muted">${esc(data.templates[x.template] || x.template)} · создан ${esc(A().fmtDate(x.created_at))}${x.paid_at ? ` · оплачен ${esc(A().fmtDate(x.paid_at))}` : ''}</p>
+            <p class="cms-muted">${esc(data.templates[x.template] || x.template)}${x.order_number ? ` · из заявки ${esc(x.order_number)}` : ''} · создан ${esc(A().fmtDate(x.created_at))}${x.paid_at ? ` · оплачен ${esc(A().fmtDate(x.paid_at))}` : ''}</p>
             <p class="site-card__owner"><b>${esc(x.owner_name)}</b> · <a href="mailto:${esc(x.owner_email)}">${esc(x.owner_email)}</a>${x.owner_phone ? ` · <a href="tel:${esc(x.owner_phone.replace(/[^\d+]/g, ''))}">${esc(x.owner_phone)}</a>` : ''}</p>
             <div class="cms-inline">
               ${x.status !== 'active' ? `<button type="button" class="btn btn--primary btn--sm" data-act="publish"><span>Опубликовать</span></button>` : ''}
@@ -683,6 +684,7 @@
               ${x.status !== 'suspended' ? `<button type="button" class="btn btn--ghost btn--sm" data-act="suspend"><span>Отключить</span></button>` : ''}
               <a class="btn btn--ghost btn--sm" href="/s/${esc(x.slug)}/edit" target="_blank" rel="noopener"><span>Редактировать</span></a>
               <button type="button" class="btn btn--ghost btn--sm" data-act="link"><span>Ссылка для клиента</span></button>
+              ${x.order_number ? '<button type="button" class="btn btn--ghost btn--sm" data-act="ai"><span>✦ Пересоздать с ИИ</span></button>' : ''}
               <button type="button" class="btn btn--ghost btn--sm btn--danger" data-act="delete"><span>Удалить</span></button>
             </div>
           </div>
@@ -709,6 +711,11 @@
           const { editUrl } = await A().api(`/sites/${id}/link`, { method: 'POST' });
           try { await navigator.clipboard.writeText(editUrl); A().toast('Ссылка скопирована — отправьте её клиенту'); } catch { prompt('Ссылка для клиента:', editUrl); }
           return;
+        } else if (act === 'ai') {
+          if (!confirm('Claude заново напишет тексты, услуги и подберёт цвета по описанию из заявки. Ручные правки текстов будут заменены. Продолжить?')) return;
+          b.classList.add('is-loading'); b.querySelector('span').textContent = 'Генерация…';
+          await A().api(`/sites/${id}/generate`, { method: 'POST' });
+          A().toast('Сайт пересоздан');
         } else if (act === 'delete') {
           if (!confirm(`Удалить сайт «${item.data.title}» безвозвратно?`)) return;
           await A().api(`/sites/${id}`, { method: 'DELETE' }); A().toast('Сайт удалён');
@@ -784,6 +791,18 @@
         </div>
         <div>
           <section class="panel-card integ">
+            <div class="integ__head"><span class="integ__logo integ__logo--ai" aria-hidden="true">✦</span>
+              <div><h2>ИИ-генерация сайтов (Claude)</h2><p class="cms-muted">По описанию из заявки ИИ сам пишет сайт клиенту: шаблон, тексты, услуги, цены и цвета.</p></div>
+              <span class="status ${data.ai.configured ? 'status--in_progress' : 'status--off'}">${data.ai.configured ? 'включена' : 'выключена'}</span></div>
+            <p class="cms-hint">Ключ создаётся на <a href="https://platform.claude.com/settings/keys" target="_blank" rel="noopener">platform.claude.com → API Keys</a>. Пополните баланс там же; генерация одного сайта стоит несколько центов. Без ключа сайт всё равно создаётся, но тексты берутся прямо из заявки.</p>
+            ${data.ai.fromEnv ? '<p class="cms-hint cms-ok">Ключ задан в переменной окружения ANTHROPIC_API_KEY.</p>' : ''}
+            <form class="cms-inline" data-ai-key>
+              <input class="input" name="apiKey" placeholder="${data.ai.keyMasked ? `сохранён: ${esc(data.ai.keyMasked)}` : 'sk-ant-…'}" autocomplete="off" spellcheck="false">
+              <button class="btn btn--primary btn--sm" type="submit"><span class="btn__label">Сохранить</span><span class="btn__spinner" aria-hidden="true"></span></button>
+              ${data.ai.keyMasked ? '<button class="btn btn--ghost btn--sm" type="button" data-ai-clear><span>Удалить ключ</span></button>' : ''}
+            </form>
+          </section>
+          <section class="panel-card integ">
             <div class="integ__head"><span class="integ__logo integ__logo--g" aria-hidden="true"><svg viewBox="0 0 24 24"><path fill="#4285F4" d="M22.5 12.3c0-.8-.1-1.5-.2-2.3H12v4.3h5.9a5 5 0 0 1-2.2 3.3v2.7h3.6c2-1.9 3.2-4.7 3.2-8z"/><path fill="#34A853" d="M12 23c3 0 5.5-1 7.3-2.7l-3.6-2.7c-1 .7-2.2 1-3.7 1-2.9 0-5.3-1.9-6.2-4.5H2.1v2.8A11 11 0 0 0 12 23z"/><path fill="#FBBC05" d="M5.8 14.1a6.6 6.6 0 0 1 0-4.2V7.1H2.1a11 11 0 0 0 0 9.8z"/><path fill="#EA4335" d="M12 5.4c1.6 0 3.1.6 4.2 1.7l3.2-3.2A11 11 0 0 0 2.1 7.1l3.7 2.8C6.7 7.3 9.1 5.4 12 5.4z"/></svg></span>
               <div><h2>Вход через Google</h2><p class="cms-muted">Вход в админку одной кнопкой и восстановление доступа, если забыли пароль.</p></div>
               <span class="status ${g.configured ? 'status--in_progress' : 'status--off'}">${g.configured ? 'включён' : 'выключен'}</span></div>
@@ -830,6 +849,16 @@
     const copy = async (text) => { try { await navigator.clipboard.writeText(text); A().toast('Скопировано'); } catch { prompt('Скопируйте:', text); } };
     const cl = $('[data-copy-link]', r); cl && cl.addEventListener('click', () => copy(t.linkUrl));
     $('[data-copy-uri]', r).addEventListener('click', () => copy(g.redirectUri));
+    const aiSave = async (apiKey, btn) => {
+      try {
+        btn && btn.classList.add('is-loading');
+        drawIntegrations(await A().api('/ai', { method: 'POST', body: { apiKey } }));
+        A().toast(apiKey ? 'Ключ Claude сохранён' : 'Ключ удалён');
+      } catch (err) { A().fail(err); } finally { btn && btn.classList.remove('is-loading'); }
+    };
+    $('[data-ai-key]', r).addEventListener('submit', (e) => { e.preventDefault(); if (e.target.apiKey.value.trim()) aiSave(e.target.apiKey.value.trim(), e.submitter); });
+    const aiClear = $('[data-ai-clear]', r);
+    aiClear && aiClear.addEventListener('click', () => { if (confirm('Удалить ключ Claude API?')) aiSave('', aiClear); });
     $('[data-google]', r).addEventListener('submit', (e) => {
       e.preventDefault();
       const f = e.target;
