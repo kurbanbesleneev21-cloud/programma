@@ -141,6 +141,10 @@ test('google sign-in: settings validation, login button, state check', async () 
   assert.equal((await (await fetch(`${base}/api/admin/auth-options`)).json()).google, false);
   assert.equal((await json('/api/admin/google', 'POST', { clientId: 'bad', allowedEmails: 'me@gmail.com' })).status, 422);
   assert.equal((await json('/api/admin/google', 'POST', { clientId: 'x.apps.googleusercontent.com', clientSecret: 's', allowedEmails: 'not-an-email' })).status, 422);
+  assert.equal((await json('/api/admin/google', 'POST', { clientId: 'x.apps.googleusercontent.com', clientSecret: 's', allowedEmails: '' })).status, 422, 'at least one Gmail is required');
+  const nogo = await fetch(`${base}/api/admin/google/start`, { redirect: 'manual' });
+  assert.equal(nogo.status, 302);
+  assert.match(decodeURIComponent(nogo.headers.get('location')), /\/admin\/\?error=Вход через Google не настроен/);
   const saved = await (await json('/api/admin/google', 'POST', { clientId: '42-abc.apps.googleusercontent.com', clientSecret: 'GOCSPX-secret-value', allowedEmails: 'Owner@Gmail.com, ops@example.com' })).json();
   assert.equal(saved.google.configured, true);
   assert.deepEqual(saved.google.allowedEmails, ['owner@gmail.com', 'ops@example.com']);

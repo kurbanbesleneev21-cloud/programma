@@ -298,6 +298,10 @@ function createApp({ store: injected } = {}) {
 
   api.get('/google/start', wrap(async (req, res) => {
     const st = await getSettings(await needStore());
+    if (!google.configured(st)) {
+      const why = st.google.clientId && !st.google.allowedEmails.length ? 'Вход через Google не настроен: добавьте ваш Gmail в «Кому разрешён вход» (Интеграции)' : 'Вход через Google не настроен';
+      return res.redirect(302, `/admin/?error=${encodeURIComponent(why)}`);
+    }
     const { url, cookie } = google.startUrl(st, originOf(req));
     res.set('Set-Cookie', cookie).redirect(302, url);
   }));
@@ -540,6 +544,7 @@ function createApp({ store: injected } = {}) {
     if (bad) throw new HttpError(422, `Некорректный e-mail: ${bad}`);
     const clientId = String(b.clientId || '').trim();
     if (clientId && !/\.apps\.googleusercontent\.com$/.test(clientId)) throw new HttpError(422, 'Client ID должен заканчиваться на .apps.googleusercontent.com');
+    if (clientId && !emails.length) throw new HttpError(422, 'Укажите хотя бы один Gmail, которому разрешён вход (например, ваш)');
     await updateSettings(req.store, (st) => {
       st.google.clientId = clientId;
       if (typeof b.clientSecret === 'string' && b.clientSecret.trim()) st.google.clientSecret = b.clientSecret.trim();

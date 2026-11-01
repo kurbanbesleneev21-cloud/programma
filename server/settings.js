@@ -96,7 +96,8 @@ function publicView(s, { origin } = {}) {
       statusButtons: s.telegram.statusButtons,
     },
     google: {
-      configured: Boolean(s.google.clientId && s.google.clientSecret),
+      configured: Boolean(s.google.clientId && s.google.clientSecret && s.google.allowedEmails.length),
+      missingEmails: Boolean(s.google.clientId && s.google.clientSecret && !s.google.allowedEmails.length),
       clientId: s.google.clientId,
       clientSecretMasked: mask(s.google.clientSecret),
       allowedEmails: s.google.allowedEmails,
