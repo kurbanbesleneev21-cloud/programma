@@ -76,6 +76,10 @@ CREATE TABLE IF NOT EXISTS events (
   at    INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_events ON events(kind, key, at);
+CREATE TABLE IF NOT EXISTS counters (
+  key TEXT PRIMARY KEY,
+  n   INTEGER NOT NULL DEFAULT 0
+);
 CREATE TABLE IF NOT EXISTS used_tokens (
   nonce TEXT PRIMARY KEY,
   at    INTEGER NOT NULL
@@ -196,6 +200,22 @@ function createSqliteStore(dataDir) {
         throw err;
       }
       return this.getOrder(id);
+    },
+
+    async deleteOrder(id) {
+      const files = db.prepare('SELECT stored_name FROM order_files WHERE order_id = ?').all(id).map((r) => r.stored_name);
+      const { changes } = db.prepare('DELETE FROM orders WHERE id = ?').run(id);
+      return changes ? files : null;
+    },
+
+    /* ---- counters (page views per day) ---- */
+    async bumpCounter(key, by = 1) {
+      db.prepare('INSERT INTO counters (key, n) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET n = n + excluded.n').run(key, by);
+    },
+    async getCounters(keys) {
+      if (!keys.length) return {};
+      const rows = db.prepare(`SELECT key, n FROM counters WHERE key IN (${keys.map(() => '?').join(',')})`).all(...keys);
+      return Object.fromEntries(rows.map((r) => [r.key, Number(r.n)]));
     },
 
     async getFile(orderId, fileId) {

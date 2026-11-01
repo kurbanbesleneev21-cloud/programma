@@ -10,6 +10,7 @@
 
   const filesWord = (n) => { const m10 = n % 10, m100 = n % 100; return `${n} ${m10 === 1 && m100 !== 11 ? 'файл' : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? 'файла' : 'файлов'}`; };
   let META = null;
+  let ME = null;
   const state = { q: '', status: '', service: '', budget: '', sort: 'newest', page: 1, per_page: 20 };
 
   /* ---------- API ---------- */
@@ -40,10 +41,18 @@
   /* ---------- Views ---------- */
   const loginView = $('[data-view="login"]');
   const appView = $('[data-view="app"]');
-  function showLogin() { appView.hidden = true; loginView.hidden = false; $('#l-user').focus(); }
-  async function showApp(user) {
+  function showLogin() {
+    appView.hidden = true; loginView.hidden = false;
+    $('#l-user').focus();
+    fetch('/api/admin/auth-options', { credentials: 'same-origin' }).then((r) => r.json()).then((o) => { $('[data-google-login]').hidden = !o.google; }).catch(() => {});
+  }
+  // Errors from the Google sign-in redirect arrive as ?error=…
+  const qsError = new URLSearchParams(location.search).get('error');
+  if (qsError) { $('[data-login-error]').textContent = qsError; history.replaceState(null, '', location.pathname + location.hash); }
+  async function showApp(me) {
+    ME = typeof me === 'string' ? { user: me } : me;
     loginView.hidden = true; appView.hidden = false;
-    $('[data-user]').textContent = user;
+    $('[data-user]').textContent = ME.email ? `${ME.user} · ${ME.email}` : ME.user;
     if (!META) { META = await api('/meta'); fillSelects(); }
     route();
   }
@@ -57,9 +66,9 @@
     errBox.textContent = '';
     btn.classList.add('is-loading');
     try {
-      const data = await api('/login', { method: 'POST', body: { username: loginForm.username.value, password: loginForm.password.value } });
+      await api('/login', { method: 'POST', body: { username: loginForm.username.value, password: loginForm.password.value } });
       loginForm.reset();
-      await showApp(data.user);
+      await showApp(await api('/me'));
     } catch (err) {
       errBox.textContent = err.message;
     } finally {
@@ -114,6 +123,14 @@
       $('[data-kpi="in_progress"]').textContent = s.in_progress;
       $('[data-kpi="done"]').textContent = s.done;
       $('[data-kpi="lastWeek"]').textContent = `+${s.lastWeek} за 7 дней`;
+      if (s.views) {
+        const max = Math.max(1, ...s.views.map((v) => v.n));
+        const total = s.views.reduce((a, v) => a + v.n, 0);
+        const week = s.views.slice(-7).reduce((a, v) => a + v.n, 0);
+        $('[data-views]').innerHTML = `
+          <div class="views__head"><span class="kpi__label">Посещения сайта</span><b>${week}</b><span class="kpi__hint">за 7 дней · ${total} за 14 дней</span></div>
+          <div class="views__bars">${s.views.map((v) => `<span style="--h:${(v.n / max * 100).toFixed(1)}%" title="${new Date(v.day).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })}: ${v.n}"><i></i></span>`).join('')}</div>`;
+      }
     } catch (err) { fail(err); }
   }
 
@@ -220,6 +237,8 @@
             <div class="contact-actions">
               <a class="btn btn--primary btn--sm" href="mailto:${esc(o.email)}?subject=${encodeURIComponent(`Заявка ${o.number}`)}"><span>Написать</span></a>
               <a class="btn btn--ghost btn--sm" href="tel:${esc(phoneHref)}"><span>Позвонить</span></a>
+              ${o.telegram ? `<a class="btn btn--ghost btn--sm" href="https://t.me/${encodeURIComponent(o.telegram)}" target="_blank" rel="noopener"><span>Telegram</span></a>` : ''}
+              ${o.contact_method === 'whatsapp' || phoneHref ? `<a class="btn btn--ghost btn--sm" href="https://wa.me/${esc(phoneHref.replace(/\D/g, ''))}" target="_blank" rel="noopener"><span>WhatsApp</span></a>` : ''}
             </div>
           </section>
           <section class="panel-card">
@@ -227,6 +246,11 @@
             <label class="sr-only" for="d-note">Заметка</label>
             <textarea class="input input--area note-area" id="d-note" maxlength="5000" placeholder="Внутренние заметки: договорённости, следующий шаг…">${esc(o.admin_note)}</textarea>
             <div class="note-actions"><button type="button" class="btn btn--ghost btn--sm" data-save-note><span>Сохранить заметку</span></button></div>
+          </section>
+          <section class="panel-card">
+            <h2>Удаление</h2>
+            <p class="cms-hint">Заявка и прикреплённые файлы будут удалены безвозвратно (например, спам).</p>
+            <button type="button" class="btn btn--ghost btn--sm btn--danger" data-delete-order><span>Удалить заявку</span></button>
           </section>
           <section class="panel-card">
             <h2>История</h2>
@@ -237,6 +261,11 @@
 
     $('#d-status').addEventListener('change', async (e) => {
       try { await api(`/orders/${o.id}`, { method: 'PATCH', body: { status: e.target.value } }); toast('Статус обновлён'); loadDetail(o.id); loadStats(); }
+      catch (err) { fail(err); }
+    });
+    $('[data-delete-order]').addEventListener('click', async () => {
+      if (!confirm(`Удалить заявку ${o.number} безвозвратно?`)) return;
+      try { await api(`/orders/${o.id}`, { method: 'DELETE' }); toast('Заявка удалена'); location.hash = '#/orders'; }
       catch (err) { fail(err); }
     });
     $('[data-save-note]').addEventListener('click', async () => {
@@ -250,11 +279,18 @@
   function route() {
     const h = location.hash || '#/orders';
     const m = h.match(/^#\/orders\/(\d+)/);
-    const cms = /^#\/(content|projects|media|settings)/.test(h);
+    const cms = /^#\/(content|projects|media|settings|integrations)/.test(h);
     $('[data-page="list"]').hidden = !!m || cms;
     $('[data-page="detail"]').hidden = !m;
     $('[data-page="cms"]').hidden = !cms;
-    $$('.sidebar__nav a[data-nav]').forEach((a) => a.classList.toggle('is-active', h.startsWith(a.getAttribute('href').split('/').slice(0, 2).join('/'))));
+    const isDesign = h.startsWith('#/content/design');
+    $$('.sidebar__nav a[data-nav]').forEach((a) => {
+      const href = a.getAttribute('href');
+      const on = href === '#/content/design' ? isDesign
+        : href.startsWith('#/content') ? h.startsWith('#/content') && !isDesign
+          : h.startsWith(href.split('/').slice(0, 2).join('/'));
+      a.classList.toggle('is-active', on);
+    });
     if (cms) window.CMS.render(h);
     else if (m) loadDetail(m[1]);
     else { loadStats(); loadList(); }
@@ -272,8 +308,8 @@
   });
   addEventListener('beforeunload', (e) => { if (window.CMS && window.CMS.hasUnsaved()) { e.preventDefault(); e.returnValue = ''; } });
 
-  window.ADMIN = { api, toast, fail, esc, fmtDate, fmtSize, meta: () => META };
+  window.ADMIN = { api, toast, fail, esc, fmtDate, fmtSize, meta: () => META, me: () => ME };
 
   /* ---------- Boot ---------- */
-  api('/me').then((me) => showApp(me.user)).catch((err) => { if (!err.silent) showLogin(); });
+  api('/me').then((me) => showApp(me)).catch((err) => { if (!err.silent) showLogin(); });
 })();

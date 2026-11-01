@@ -336,7 +336,7 @@ func main() {
     // mouse parallax
     pointer.sx += (pointer.x - pointer.sx) * 0.05;
     pointer.sy += (pointer.y - pointer.sy) * 0.05;
-    const sc = Math.min(scrollY, innerHeight);
+    const sc = document.body.dataset.heroFixed === '1' ? 0 : Math.min(scrollY, innerHeight);
     layers.forEach((l) => {
       const d = Number(l.dataset.depth);
       l.style.transform = `translate3d(${(pointer.sx * d * -22).toFixed(2)}px, ${(pointer.sy * d * -12 + sc * d * 0.18).toFixed(2)}px, 0)`;

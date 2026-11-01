@@ -33,6 +33,19 @@ function localStore() {
       try { return await fs.readFile(full(bucket, p)); } catch { return null; }
     },
     async remove(bucket, p) { await fs.unlink(full(bucket, p)).catch(() => {}); },
+    // Direct browser uploads are only possible with Supabase; locally files go through the server.
+    async signUpload() { return null; },
+    async head(bucket, p, n = 32) {
+      try {
+        const fh = await fs.open(full(bucket, p), 'r');
+        try {
+          const { size } = await fh.stat();
+          const buf = Buffer.alloc(Math.min(n, size));
+          await fh.read(buf, 0, buf.length, 0);
+          return { size, bytes: buf };
+        } finally { await fh.close(); }
+      } catch { return null; }
+    },
     localPublicDir: roots.public,
   };
 }
@@ -80,6 +93,39 @@ function supabaseStore() {
       const res = await fetch(`${url}/storage/v1/object/${names[bucket]}/${p}`, { headers: headers(), signal: AbortSignal.timeout(20_000) });
       if (!res.ok) return null;
       return Buffer.from(await res.arrayBuffer());
+    },
+    // Signed upload URL: the browser PUTs the file straight to Supabase (no 4.5 MB Vercel body limit).
+    async signUpload(bucket, p) {
+      if (!SAFE_PATH.test(p)) throw new Error('bad storage path');
+      await init();
+      const res = await fetch(`${url}/storage/v1/object/upload/sign/${names[bucket]}/${p}`, {
+        method: 'POST',
+        headers: headers({ 'Content-Type': 'application/json' }),
+        body: '{}',
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (!res.ok) throw new Error(`Supabase sign failed: ${res.status} ${await res.text()}`);
+      const data = await res.json();
+      const signed = String(data.url || data.signedURL || '');
+      const token = new URL(signed, url).searchParams.get('token');
+      if (!token) throw new Error('Supabase sign: no token');
+      return {
+        uploadUrl: `${url}/storage/v1/object/upload/sign/${names[bucket]}/${p}?token=${encodeURIComponent(token)}`,
+        publicUrl: bucket === 'public' ? `${url}/storage/v1/object/public/${names.public}/${p}` : null,
+      };
+    },
+    // First bytes + total size of an uploaded object (to validate direct uploads).
+    async head(bucket, p, n = 32) {
+      if (!SAFE_PATH.test(p)) return null;
+      const res = await fetch(`${url}/storage/v1/object/${names[bucket]}/${p}`, {
+        headers: headers({ Range: `bytes=0-${n - 1}` }),
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (!res.ok) return null;
+      const bytes = Buffer.from(await res.arrayBuffer()).subarray(0, n);
+      const range = res.headers.get('content-range');
+      const size = range && /\/(\d+)$/.test(range) ? Number(range.match(/\/(\d+)$/)[1]) : Number(res.headers.get('content-length')) || bytes.length;
+      return { size, bytes };
     },
     async remove(bucket, p) {
       await fetch(`${url}/storage/v1/object/${names[bucket]}`, {

@@ -78,6 +78,10 @@ CREATE TABLE IF NOT EXISTS events (
   at   BIGINT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_events ON events(kind, key, at);
+CREATE TABLE IF NOT EXISTS counters (
+  key TEXT PRIMARY KEY,
+  n   BIGINT NOT NULL DEFAULT 0
+);
 CREATE TABLE IF NOT EXISTS used_tokens (
   nonce TEXT PRIMARY KEY,
   at    BIGINT NOT NULL
@@ -303,6 +307,21 @@ async function createPostgresStore(connectionString) {
       return rows[0] ? { ...rows[0], id: Number(rows[0].id), created_at: iso(rows[0].created_at) } : null;
     },
     async deleteMedia(id) { await pool.query('DELETE FROM media WHERE id = $1', [id]); },
+
+    async deleteOrder(id) {
+      const files = (await pool.query('SELECT stored_name FROM order_files WHERE order_id = $1', [id])).rows.map((r) => r.stored_name);
+      const { rowCount } = await pool.query('DELETE FROM orders WHERE id = $1', [id]);
+      return rowCount ? files : null;
+    },
+
+    async bumpCounter(key, by = 1) {
+      await pool.query('INSERT INTO counters (key, n) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET n = counters.n + EXCLUDED.n', [key, by]);
+    },
+    async getCounters(keys) {
+      if (!keys.length) return {};
+      const { rows } = await pool.query('SELECT key, n FROM counters WHERE key = ANY($1)', [keys]);
+      return Object.fromEntries(rows.map((r) => [r.key, Number(r.n)]));
+    },
 
     async addEvent(kind, key) {
       await pool.query('INSERT INTO events (kind, key, at) VALUES ($1, $2, $3)', [kind, key, Date.now()]);

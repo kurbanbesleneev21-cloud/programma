@@ -143,7 +143,68 @@ const DEFAULTS = {
   },
   footer: { copyright: '© 2026 CODEFORGE. ALL RIGHTS RESERVED.' },
   notifications: { telegramChatId: '', notifyEmail: '', clientConfirmation: true },
+
+  /* ---------- Design & behaviour ---------- */
+  design: {
+    background: 'aurora',      // aurora | particles | grid | image | video | none
+    bgImage: '',
+    bgVideo: '',
+    bgDim: 55,                 // darkening over image/video, %
+    color1: '#6d5dfc',
+    color2: '#22d3ee',
+    color3: '#ffffff',
+    heroFixed: true,           // hero scene stays in place while the text scrolls over it
+    animations: true,
+    preloader: true,
+    scrollProgress: true,
+    textReveal: true,
+    tilt: true,
+    cursor: true,
+    backToTop: true,
+  },
+  announcement: { enabled: false, text: 'Бесплатная консультация и оценка проекта — ответим в течение 24 часов', link: '#order', linkLabel: 'Оставить заявку' },
+  marquee: {
+    enabled: true,
+    speed: 40,
+    items: ['React', 'Next.js', 'Node.js', 'TypeScript', 'Kotlin', 'Swift', 'Flutter', 'PostgreSQL', 'Figma', 'Docker', 'AWS', 'Supabase'],
+  },
+  pricing: {
+    enabled: false,
+    eyebrow: 'Стоимость',
+    title: 'Пакеты и цены',
+    subtitle: 'Ориентировочная стоимость. Точную смету пришлём после обсуждения задачи.',
+    items: [
+      { name: 'Лендинг', price: 'от 900 €', period: '1–2 недели', features: ['Индивидуальный дизайн', 'Адаптив под телефоны', 'Форма заявок', 'Базовое SEO'], button: 'Заказать', service: 'website', highlighted: false },
+      { name: 'Корпоративный сайт', price: 'от 2 500 €', period: '3–6 недель', features: ['До 15 страниц', 'Админ-панель', 'Интеграции с CRM', 'Аналитика'], button: 'Заказать', service: 'website', highlighted: true },
+      { name: 'Мобильное приложение', price: 'от 6 000 €', period: '2–4 месяца', features: ['iOS и Android', 'Личный кабинет', 'Push-уведомления', 'Публикация в сторах'], button: 'Обсудить', service: 'android', highlighted: false },
+    ],
+  },
+  testimonials: {
+    enabled: false,
+    eyebrow: 'Отзывы',
+    title: 'Что говорят клиенты',
+    items: [
+      { name: 'Имя клиента', role: 'Должность, компания', text: 'Здесь будет реальный отзыв клиента. Замените этот текст в админ-панели → Контент → Отзывы.', avatar: '', rating: 5 },
+    ],
+  },
+  widgets: {
+    floatingContacts: true,
+    cookieBanner: false,
+    cookieText: 'Мы используем cookie для корректной работы сайта и аналитики.',
+  },
+  maintenance: {
+    enabled: false,
+    title: 'Сайт на техническом обслуживании',
+    text: 'Мы обновляем сайт и скоро вернёмся. Связаться с нами можно по почте или в Telegram.',
+  },
+  analytics: { yandexMetrika: '', googleAnalytics: '' },
+  layout: { order: ['services', 'about', 'process', 'order', 'projects', 'pricing', 'testimonials', 'advantages', 'faq', 'cta'] },
 };
+
+const SECTION_IDS = ['services', 'about', 'process', 'order', 'projects', 'pricing', 'testimonials', 'advantages', 'faq', 'cta'];
+const BACKGROUNDS = ['aurora', 'particles', 'grid', 'image', 'video', 'none'];
+const clamp = (n, a, b) => Math.min(b, Math.max(a, Number(n) || 0));
+const color = (v, fallback) => (/^#[0-9a-f]{6}$/i.test(v) ? v.toLowerCase() : fallback);
 
 /* ---------- Shape enforcement ----------
    Incoming JSON is forced into the shape of DEFAULTS: unknown keys are dropped,
@@ -183,6 +244,19 @@ function normalize(input) {
     p.slug = slug;
   });
   c.contacts.telegram = c.contacts.telegram.replace(/^https?:\/\/t\.me\//i, '').replace(/^@/, '');
+
+  const d = c.design;
+  if (!BACKGROUNDS.includes(d.background)) d.background = DEFAULTS.design.background;
+  d.bgDim = clamp(d.bgDim, 0, 90);
+  for (const k of ['color1', 'color2', 'color3']) d[k] = color(d[k], DEFAULTS.design[k]);
+  c.marquee.speed = clamp(c.marquee.speed, 10, 120);
+  c.marquee.items = c.marquee.items.map((x) => x.trim()).filter(Boolean);
+  c.testimonials.items.forEach((t) => { t.rating = clamp(Math.round(t.rating), 0, 5); });
+  c.analytics.yandexMetrika = c.analytics.yandexMetrika.replace(/\D/g, '').slice(0, 12);
+  c.analytics.googleAnalytics = /^G-[A-Z0-9]{4,20}$/i.test(c.analytics.googleAnalytics.trim()) ? c.analytics.googleAnalytics.trim().toUpperCase() : '';
+  // Section order: known ids only, each once, missing ones appended.
+  const order = c.layout.order.filter((id, i, a) => SECTION_IDS.includes(id) && a.indexOf(id) === i);
+  c.layout.order = [...order, ...SECTION_IDS.filter((id) => !order.includes(id))];
   return c;
 }
 
@@ -215,4 +289,4 @@ async function saveContent(store, input) {
 
 const invalidateContent = () => { cache = { at: 0, data: null }; };
 
-module.exports = { DEFAULTS, normalize, getContent, saveContent, invalidateContent, slugify };
+module.exports = { DEFAULTS, SECTION_IDS, normalize, getContent, saveContent, invalidateContent, slugify };

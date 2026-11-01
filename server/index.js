@@ -9,14 +9,17 @@ const constants = require('./constants');
 const { createStore } = require('./db');
 const sec = require('./security');
 const { orderSchema, adminUpdateSchema, listQuerySchema, formatZodError, emailDomainAccepts } = require('./validation');
-const { upload, imageUpload, persistFiles, persistImage, removeFiles, readStoredFile, UploadError } = require('./uploads');
+const { upload, mediaUpload, persistFiles, persistMedia, describeMedia, verifyDirectUpload, removeFiles, readStoredFile, UploadError, MEDIA_LIMITS } = require('./uploads');
 const { storage } = require('./storage');
 const { notifyNewOrder } = require('./notify');
 const { DEFAULTS, normalize, getContent, saveContent, invalidateContent } = require('./content');
+const { getSettings, updateSettings, publicView } = require('./settings');
+const telegram = require('./telegram');
+const google = require('./google');
 const { ICONS } = require('./views/icons');
 const { SOCIAL_ICONS } = require('./views/partials');
 const { renderHome } = require('./views/home');
-const { renderProjectPage, contentPage } = require('./render');
+const { renderProjectPage, contentPage, maintenancePage } = require('./render');
 
 const PUBLIC_DIR = path.join(config.ROOT, 'public');
 
@@ -26,6 +29,9 @@ class HttpError extends Error {
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
 const HOUR = 60 * 60 * 1000;
+// Yandex Metrika / Google Analytics (loaded only when their IDs are set in the admin panel).
+const ANALYTICS_HOSTS = 'https://mc.yandex.ru https://mc.yandex.com https://yastatic.net https://www.googletagmanager.com https://*.google-analytics.com https://*.analytics.google.com';
+const BOT_UA = /bot|crawl|spider|slurp|preview|facebookexternalhit|vercel|lighthouse|headless/i;
 const PAGE_CACHE = 'public, max-age=0, s-maxage=10, stale-while-revalidate=60';
 
 function createApp({ store: injected } = {}) {
@@ -56,12 +62,12 @@ function createApp({ store: injected } = {}) {
     res.set({
       'Content-Security-Policy': [
         "default-src 'self'",
-        "script-src 'self'",
+        `script-src 'self' ${ANALYTICS_HOSTS}`,
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
         "font-src 'self' https://fonts.gstatic.com",
         "img-src 'self' data: blob: https:",
         "media-src 'self' https:",
-        "connect-src 'self'",
+        `connect-src 'self' ${[config.supabase.url, ANALYTICS_HOSTS].filter(Boolean).join(' ')}`,
         "object-src 'none'",
         "base-uri 'self'",
         "form-action 'self'",
@@ -105,6 +111,22 @@ function createApp({ store: injected } = {}) {
     let db = 'unavailable';
     try { db = (await getStore()).kind; } catch { /* reported below */ }
     res.json({ ok: db !== 'unavailable', db, storage: storage.kind, vercel: config.isVercel, sessionSecret: Boolean(config.sessionSecret) });
+  }));
+
+  // Telegram → bot updates. The secret is in the path and in the header Telegram sends back.
+  app.post('/api/telegram/webhook/:secret', express.json({ limit: '1mb' }), wrap(async (req, res) => {
+    const store = await needStore();
+    const st = await getSettings(store);
+    const secretOk = st.telegram.webhookSecret
+      && sec.safeEqual(req.params.secret, st.telegram.webhookSecret)
+      && sec.safeEqual(String(req.get('x-telegram-bot-api-secret-token') || ''), st.telegram.webhookSecret);
+    if (!secretOk) throw new HttpError(404, 'Not found');
+    try {
+      await telegram.handleUpdate(store, req.body || {}, { origin: originOf(req) });
+    } catch (err) {
+      console.error('[telegram] update failed:', err.message); // always 200, or Telegram retries forever
+    }
+    res.json({ ok: true });
   }));
 
   app.get('/api/form-token', wrap(async (req, res) => {
@@ -188,7 +210,7 @@ function createApp({ store: injected } = {}) {
         const saved = await store.createOrder(order, files);
         const n = req.siteContent.notifications;
         // On serverless the function may freeze right after responding, so notifications are awaited (with timeouts).
-        await notifyNewOrder({ ...order, id: saved.id }, files.length, { origin: originOf(req), settings: n });
+        await notifyNewOrder({ ...order, id: saved.id }, files.length, { origin: originOf(req), settings: n, store });
         res.status(201).json({
           ok: true,
           number: saved.number,
@@ -231,6 +253,43 @@ function createApp({ store: injected } = {}) {
     res.json({ ok: true, user: config.admin.user });
   }));
 
+  // Login screen asks which sign-in methods are available.
+  api.get('/auth-options', wrap(async (req, res) => {
+    let googleOn = false;
+    try { googleOn = google.configured(await getSettings(await getStore())); } catch { /* db down */ }
+    res.json({ google: googleOn });
+  }));
+
+  api.get('/google/start', wrap(async (req, res) => {
+    const st = await getSettings(await needStore());
+    const { url, cookie } = google.startUrl(st, originOf(req));
+    res.set('Set-Cookie', cookie).redirect(302, url);
+  }));
+
+  api.get('/google/callback', async (req, res) => {
+    const back = (msg) => res.set('Set-Cookie', google.stateCookie('', 0)).redirect(302, `/admin/${msg ? `?error=${encodeURIComponent(msg)}` : ''}`);
+    try {
+      if (req.query.error) return back(req.query.error === 'access_denied' ? 'Вход через Google отменён' : `Google: ${req.query.error}`);
+      const store = await needStore();
+      const key = sec.ipHash(clientIp(req));
+      if ((await store.countEvents('login_fail', key, 15 * 60 * 1000)) >= 8) return back('Слишком много попыток входа. Повторите через 15 минут.');
+      const st = await getSettings(store);
+      const cookieState = sec.parseCookies(req.get('cookie'))[google.STATE_COOKIE];
+      let who;
+      try {
+        who = await google.finish(st, { code: String(req.query.code || ''), state: String(req.query.state || ''), cookieState, origin: originOf(req) });
+      } catch (err) {
+        if (err.status === 403) await store.addEvent('login_fail', key);
+        throw err;
+      }
+      res.append('Set-Cookie', sec.sessionCookie(sec.createSession(config.admin.user, { method: 'google', email: who.email }), sec.SESSION_TTL_MS));
+      return back('');
+    } catch (err) {
+      if (!err.expose) console.error('[google]', err);
+      return back(err.expose ? err.message : 'Не удалось войти через Google');
+    }
+  });
+
   const sessionFrom = (req) => sec.readSession(sec.parseCookies(req.get('cookie'))[sec.SESSION_COOKIE]);
 
   const requireAdmin = wrap(async (req, res, next) => {
@@ -252,9 +311,9 @@ function createApp({ store: injected } = {}) {
     res.set('Set-Cookie', sec.sessionCookie('', 0)).json({ ok: true });
   }));
 
-  api.get('/me', requireAdmin, (req, res) => res.json({ user: req.admin.u, expires: req.admin.exp }));
+  api.get('/me', requireAdmin, (req, res) => res.json({ user: req.admin.u, expires: req.admin.exp, method: req.admin.m || 'password', email: req.admin.e || '' }));
 
-  api.get('/meta', requireAdmin, (req, res) => res.json({
+  api.get('/meta', requireAdmin, wrap(async (req, res, next) => { req.settings = await getSettings(req.store); next(); }), (req, res) => res.json({
     ...constants,
     ICONS: Object.fromEntries(Object.entries(ICONS).map(([k, v]) => [k, v.label])),
     SOCIALS: Object.fromEntries(Object.entries(SOCIAL_ICONS).map(([k, v]) => [k, v.label])),
@@ -262,9 +321,11 @@ function createApp({ store: injected } = {}) {
       vercel: config.isVercel,
       db: req.store.kind,
       storage: storage.kind,
-      telegramBot: Boolean(config.telegram.token),
+      telegramBot: Boolean(config.telegram.token) || Boolean(req.settings && req.settings.telegram.token),
       smtp: Boolean(config.smtp.host && config.smtp.from),
       maxUpload: config.uploads.maxFileSize,
+      directUpload: storage.kind === 'supabase',
+      mediaLimits: MEDIA_LIMITS,
     },
   }));
 
@@ -272,7 +333,10 @@ function createApp({ store: injected } = {}) {
   api.get('/stats', requireAdmin, wrap(async (req, res) => {
     const { byStatus, lastWeek } = await req.store.stats();
     const total = Object.values(byStatus).reduce((a, b) => a + b, 0);
-    res.json({ total, lastWeek, byStatus, new: byStatus.new || 0, in_progress: byStatus.in_progress || 0, done: byStatus.done || 0 });
+    const days = Array.from({ length: 14 }, (_, i) => new Date(Date.now() - (13 - i) * 864e5).toISOString().slice(0, 10));
+    const counters = await req.store.getCounters(days.map((d) => `pv:${d}`));
+    const views = days.map((d) => ({ day: d, n: counters[`pv:${d}`] || 0 }));
+    res.json({ total, lastWeek, byStatus, new: byStatus.new || 0, in_progress: byStatus.in_progress || 0, done: byStatus.done || 0, views });
   }));
 
   api.get('/orders', requireAdmin, wrap(async (req, res) => {
@@ -299,6 +363,13 @@ function createApp({ store: injected } = {}) {
     const order = await req.store.updateOrder(idParam(req.params.id), parsed.data);
     if (!order) throw new HttpError(404, 'Заявка не найдена');
     res.json(order);
+  }));
+
+  api.delete('/orders/:id', requireAdmin, wrap(async (req, res) => {
+    const files = await req.store.deleteOrder(idParam(req.params.id));
+    if (!files) throw new HttpError(404, 'Заявка не найдена');
+    await removeFiles(files);
+    res.json({ ok: true });
   }));
 
   api.get('/orders/:id/files/:fileId', requireAdmin, wrap(async (req, res) => {
@@ -359,9 +430,26 @@ function createApp({ store: injected } = {}) {
   /* ---- media library ---- */
   api.get('/media', requireAdmin, wrap(async (req, res) => res.json({ items: await req.store.listMedia() })));
 
-  api.post('/media', requireAdmin, imageUpload.single('file'), wrap(async (req, res) => {
-    const saved = await persistImage(req.file);
+  // Small files (and everything in local mode) go through the server.
+  api.post('/media', requireAdmin, mediaUpload.single('file'), wrap(async (req, res) => {
+    const saved = await persistMedia(req.file);
     res.status(201).json(await req.store.addMedia(saved));
+  }));
+
+  // Large photos/videos: the browser uploads straight to Supabase Storage with a signed URL.
+  api.post('/media/sign', requireAdmin, wrap(async (req, res) => {
+    const { name, size } = req.body || {};
+    const d = describeMedia(name, size);
+    const signed = await storage.signUpload('public', d.path);
+    if (!signed) return res.json({ direct: false });
+    res.json({ direct: true, path: d.path, uploadUrl: signed.uploadUrl, mime: d.type.mime });
+  }));
+
+  api.post('/media/complete', requireAdmin, wrap(async (req, res) => {
+    const { path: p, name } = req.body || {};
+    const meta = await verifyDirectUpload(String(p || ''), String(name || 'file'));
+    const url = `${config.supabase.url}/storage/v1/object/public/${config.supabase.publicBucket}/${meta.path}`;
+    res.status(201).json(await req.store.addMedia({ ...meta, url }));
   }));
 
   api.delete('/media/:id', requireAdmin, wrap(async (req, res) => {
@@ -376,20 +464,83 @@ function createApp({ store: injected } = {}) {
   api.post('/password', requireAdmin, wrap(async (req, res) => {
     const { current, next: pw } = req.body || {};
     const dbHash = await req.store.getKv('admin_password_hash');
-    if (!sec.checkAdminCredentials(config.admin.user, current, dbHash)) throw new HttpError(400, 'Текущий пароль указан неверно', { fields: { current: 'Неверный пароль' } });
+    const viaGoogle = req.admin.m === 'google'; // access recovery: signed in with Google, old password not needed
+    if (!viaGoogle && !sec.checkAdminCredentials(config.admin.user, current, dbHash)) throw new HttpError(400, 'Текущий пароль указан неверно', { fields: { current: 'Неверный пароль' } });
     if (typeof pw !== 'string' || pw.length < 10) throw new HttpError(422, 'Новый пароль должен быть не короче 10 символов', { fields: { next: 'Минимум 10 символов' } });
     await req.store.setKv('admin_password_hash', sec.hashPassword(pw));
     // Invalidate all other sessions, keep the current one alive with a fresh cookie.
     await req.store.setKv('admin_session_epoch', String(Date.now()));
     await new Promise((r) => setTimeout(r, 5));
-    res.set('Set-Cookie', sec.sessionCookie(sec.createSession(config.admin.user), sec.SESSION_TTL_MS));
+    res.set('Set-Cookie', sec.sessionCookie(sec.createSession(config.admin.user, { method: req.admin.m, email: req.admin.e }), sec.SESSION_TTL_MS));
     res.json({ ok: true });
+  }));
+
+  /* ---- integrations: Telegram bot, Google sign-in ---- */
+  const integrations = async (req) => publicView(await getSettings(req.store), { origin: originOf(req) });
+  api.get('/integrations', requireAdmin, wrap(async (req, res) => res.json(await integrations(req))));
+
+  api.post('/telegram/connect', requireAdmin, wrap(async (req, res) => {
+    await telegram.connectBot(req.store, (req.body || {}).token, originOf(req));
+    res.json(await integrations(req));
+  }));
+  api.post('/telegram/disconnect', requireAdmin, wrap(async (req, res) => { await telegram.disconnectBot(req.store); res.json(await integrations(req)); }));
+  api.post('/telegram/relink', requireAdmin, wrap(async (req, res) => { await telegram.regenerateLink(req.store); res.json(await integrations(req)); }));
+  api.post('/telegram/phone', requireAdmin, wrap(async (req, res) => { await telegram.setPhone(req.store, (req.body || {}).phone); res.json(await integrations(req)); }));
+  api.post('/telegram/buttons', requireAdmin, wrap(async (req, res) => { await telegram.setStatusButtons(req.store, (req.body || {}).on); res.json(await integrations(req)); }));
+  api.post('/telegram/chats', requireAdmin, wrap(async (req, res) => { await telegram.addChatById(req.store, (req.body || {}).id); res.json(await integrations(req)); }));
+  api.delete('/telegram/chats/:id', requireAdmin, wrap(async (req, res) => { await telegram.removeChat(req.store, req.params.id); res.json(await integrations(req)); }));
+  api.post('/telegram/detect', requireAdmin, wrap(async (req, res) => {
+    const r = await telegram.detectChats(req.store);
+    res.json({ ...(await integrations(req)), detect: r });
+  }));
+  api.post('/telegram/test', requireAdmin, wrap(async (req, res) => res.json(await telegram.sendTest(req.store, originOf(req)))));
+
+  api.post('/google', requireAdmin, wrap(async (req, res) => {
+    const b = req.body || {};
+    const emails = (Array.isArray(b.allowedEmails) ? b.allowedEmails : String(b.allowedEmails || '').split(/[\s,;]+/))
+      .map((e) => String(e).trim().toLowerCase()).filter(Boolean);
+    const bad = emails.find((e) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e));
+    if (bad) throw new HttpError(422, `Некорректный e-mail: ${bad}`);
+    const clientId = String(b.clientId || '').trim();
+    if (clientId && !/\.apps\.googleusercontent\.com$/.test(clientId)) throw new HttpError(422, 'Client ID должен заканчиваться на .apps.googleusercontent.com');
+    await updateSettings(req.store, (st) => {
+      st.google.clientId = clientId;
+      if (typeof b.clientSecret === 'string' && b.clientSecret.trim()) st.google.clientSecret = b.clientSecret.trim();
+      if (!clientId) st.google.clientSecret = '';
+      st.google.allowedEmails = emails;
+    });
+    res.json(await integrations(req));
   }));
 
   app.use('/api/admin', api);
   app.use('/api', (req, res, next) => next(new HttpError(404, 'Not found')));
 
   /* ---------- Pages ---------- */
+
+  // Maintenance mode: visitors see a holding page; a signed-in admin still sees the site.
+  const PAGE_PATHS = /^\/(?:$|index\.html$|projects\/|privacy$|terms$)/;
+  app.use(wrap(async (req, res, next) => {
+    if (req.method !== 'GET' || !PAGE_PATHS.test(req.path)) return next();
+    const c = await siteContent();
+    if (c.maintenance.enabled && !sessionFrom(req)) {
+      return res.status(503).set({ 'Retry-After': '3600', 'Cache-Control': 'no-store' }).type('html').send(maintenancePage(c, { origin: originOf(req) }));
+    }
+    // Page views per day for the admin dashboard (bots and prefetches excluded).
+    if (!BOT_UA.test(String(req.get('user-agent') || '')) && req.get('purpose') !== 'prefetch' && req.get('sec-purpose') == null) {
+      getStore().then((st) => st.bumpCounter(`pv:${new Date().toISOString().slice(0, 10)}`)).catch(() => {});
+    }
+    if (c.maintenance.enabled) res.set('Cache-Control', 'no-store');
+    next();
+  }));
+
+  // Analytics bootstrap (no inline scripts: CSP stays strict).
+  app.get('/analytics.js', wrap(async (req, res) => {
+    const { yandexMetrika: ym, googleAnalytics: ga } = (await siteContent()).analytics;
+    const js = [];
+    if (ym) js.push(`(function(m,e,t,r,i,k,a){m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};m[i].l=1*new Date();k=e.createElement(t);a=e.getElementsByTagName(t)[0];k.async=1;k.src=r;a.parentNode.insertBefore(k,a)})(window,document,'script','https://mc.yandex.ru/metrika/tag.js','ym');ym(${Number(ym)},'init',{clickmap:true,trackLinks:true,accurateTrackBounce:true,webvisor:false});`);
+    if (ga) js.push(`(function(){var s=document.createElement('script');s.async=true;s.src='https://www.googletagmanager.com/gtag/js?id=${ga}';document.head.appendChild(s);window.dataLayer=window.dataLayer||[];window.gtag=function(){dataLayer.push(arguments);};gtag('js',new Date());gtag('config','${ga}');})();`);
+    res.set('Cache-Control', 'public, max-age=300').type('application/javascript').send(js.join('\n'));
+  }));
 
   app.get(['/', '/index.html'], wrap(async (req, res) => {
     const c = await siteContent();

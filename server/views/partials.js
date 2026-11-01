@@ -62,7 +62,90 @@ function head({ c, origin, title, description, canonical, ogTitle, ogDescription
   <link rel="stylesheet" href="/assets/css/main.css">
   ${jsonLd ? `<script type="application/ld+json">${JSON.stringify(jsonLd).replace(/</g, '\\u003c')}</script>` : ''}
   ${['/assets/js/main.js', ...scripts].map((s) => `<script src="${s}" defer></script>`).join('\n  ')}
+  ${c.analytics && (c.analytics.yandexMetrika || c.analytics.googleAnalytics) ? '<script src="/analytics.js" defer></script>' : ''}
 </head>`;
+}
+
+/* ---------- Page chrome shared by every public page ---------- */
+const flag = (b) => (b ? '1' : '0');
+
+function backgroundLayer(c) {
+  const d = c.design;
+  const img = d.background === 'image' && safeUrl(d.bgImage, { allowMailTel: false });
+  const vid = d.background === 'video' && safeUrl(d.bgVideo, { allowMailTel: false });
+  const poster = vid && safeUrl(d.bgImage, { allowMailTel: false });
+  const aurora = d.background === 'aurora';
+  const particles = ['aurora', 'particles'].includes(d.background);
+  const grid = ['aurora', 'grid'].includes(d.background);
+  return `
+  <div class="bgfx" aria-hidden="true">
+    ${img ? `<img class="bgfx__media" src="${esc(img)}" alt="" decoding="async">` : ''}
+    ${vid ? `<video class="bgfx__media" src="${esc(vid)}"${poster ? ` poster="${esc(poster)}"` : ''} autoplay muted loop playsinline preload="auto"></video>` : ''}
+    ${aurora ? '<div class="bgfx__aurora"><i></i><i></i><i></i></div>' : ''}
+    ${grid ? '<div class="bgfx__grid"></div>' : ''}
+    ${particles ? '<canvas class="bg-particles"></canvas>' : ''}
+    ${img || vid ? '<div class="bgfx__dim"></div>' : ''}
+    <div class="bgfx__vignette"></div>
+  </div>`;
+}
+
+function bodyOpen(c, { home = false } = {}) {
+  const d = c.design;
+  const a = c.announcement;
+  const showAnn = a.enabled && a.text;
+  const annLink = showAnn && a.link && a.linkLabel ? safeUrl(a.link) : '';
+  const attrs = [
+    `data-bg="${esc(d.background)}"`,
+    `data-fx="${flag(d.animations)}"`,
+    `data-hero-fixed="${flag(d.heroFixed)}"`,
+    `data-text-reveal="${flag(d.animations && d.textReveal)}"`,
+    `data-tilt="${flag(d.animations && d.tilt)}"`,
+    `data-cursor="${flag(d.cursor)}"`,
+    `style="--c1:${d.color1};--c2:${d.color2};--c3:${d.color3};--bg-dim:${(d.bgDim / 100).toFixed(2)};--marquee-speed:${c.marquee.speed}s"`,
+  ];
+  return `
+<body ${attrs.join(' ')}${showAnn ? ' class="has-announce"' : ''}>
+  <a class="skip-link" href="#main">Перейти к содержимому</a>
+  ${d.animations && d.preloader && home ? `<div class="preloader" aria-hidden="true"><div class="preloader__inner"><span class="logo__mark"><svg viewBox="0 0 32 32"><path d="M11 9 4 16l7 7M21 9l7 7-7 7M18 6l-4 20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span class="preloader__name">${esc(c.brand.name)}</span><span class="preloader__bar"><i></i></span></div></div>` : ''}
+  ${d.scrollProgress ? '<div class="scroll-progress" aria-hidden="true"><i></i></div>' : ''}
+  ${backgroundLayer(c)}
+  <div class="cursor" aria-hidden="true"><span class="cursor__dot"></span><span class="cursor__ring"></span></div>
+  ${showAnn ? `<div class="announce" role="region" aria-label="Объявление"><p><span class="pulse-dot" aria-hidden="true"></span><span>${esc(a.text)}</span>${annLink ? `<a href="${esc(annLink)}"${home && annLink === '#order' ? ' data-order-link' : ''}>${esc(a.linkLabel)} →</a>` : ''}</p><button type="button" class="announce__close" aria-label="Скрыть объявление" data-announce-close>✕</button></div>` : ''}
+${nav(c, { home })}`;
+}
+
+function floatingContacts(c) {
+  if (!c.widgets.floatingContacts) return '';
+  const items = [];
+  if (c.contacts.telegram) items.push(['telegram', `https://t.me/${encodeURIComponent(c.contacts.telegram)}`, 'Написать в Telegram']);
+  const wa = c.socials.find((s) => s.type === 'whatsapp' && safeUrl(s.url, { allowMailTel: false }));
+  if (wa) items.push(['whatsapp', safeUrl(wa.url, { allowMailTel: false }), 'Написать в WhatsApp']);
+  if (c.contacts.phone) items.push(['phone', `tel:${c.contacts.phone.replace(/[^\d+]/g, '')}`, 'Позвонить']);
+  if (!items.length && c.contacts.email) items.push(['mail', `mailto:${c.contacts.email}`, 'Написать на почту']);
+  if (!items.length) return '';
+  const ico = {
+    telegram: `<path d="${SOCIAL_ICONS.telegram.path}"/>`,
+    whatsapp: `<path d="${SOCIAL_ICONS.whatsapp.path}"/>`,
+    phone: '<path d="M6.6 10.8a15.2 15.2 0 0 0 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1A17 17 0 0 1 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.3.2 2.5.6 3.6.1.3 0 .7-.2 1z"/>',
+    mail: '<path d="M3 5h18v14H3zm2 2v.5l7 4.5 7-4.5V7zm14 3-7 4.5L5 10v7h14z"/>',
+  };
+  return `
+  <div class="fab" data-fab>
+    <div class="fab__list">${items.map(([k, href, label]) => `<a class="fab__item fab__item--${k}" href="${esc(href)}"${href.startsWith('http') ? ' target="_blank" rel="noopener"' : ''} aria-label="${label}"><svg viewBox="0 0 24 24" aria-hidden="true">${ico[k]}</svg></a>`).join('')}</div>
+    <button type="button" class="fab__toggle" aria-expanded="false" aria-label="Связаться с нами"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v12H7l-3 3z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M8 9h8M8 12h5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
+  </div>`;
+}
+
+function bodyClose(c, { home = false } = {}) {
+  const w = c.widgets;
+  return `
+${footer(c, { home })}
+  ${floatingContacts(c)}
+  ${c.design.backToTop ? '<button type="button" class="to-top" aria-label="Наверх" data-to-top><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 16V5m-5 4 5-5 5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>' : ''}
+  ${w.cookieBanner && w.cookieText ? `<div class="cookie" data-cookie hidden role="dialog" aria-label="Cookie"><p>${esc(w.cookieText)} <a href="/privacy">Подробнее</a></p><button type="button" class="btn btn--primary btn--sm" data-cookie-ok><span>Понятно</span></button></div>` : ''}
+  <div class="toast" data-toast role="status" aria-live="polite" hidden></div>
+</body>
+</html>`;
 }
 
 const logo = (c, href) => `<a class="logo" href="${href}" aria-label="${esc(c.brand.name)} — на главную"><span class="logo__mark" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M11 9 4 16l7 7M21 9l7 7-7 7M18 6l-4 20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span class="logo__text">${esc(c.brand.name)}</span></a>`;
@@ -73,6 +156,7 @@ function navLinks(c, home) {
   if (c.services.enabled) links.push(['services', 'Услуги', `${p}#services`]);
   if (c.projects.enabled && c.projects.items.some((x) => x.published)) links.push(['projects', 'Проекты', `${p}#projects`]);
   if (c.about.enabled) links.push(['about', 'О нас', `${p}#about`]);
+  if (c.pricing && c.pricing.enabled && c.pricing.items.length) links.push(['pricing', 'Цены', `${p}#pricing`]);
   links.push(['contacts', 'Контакты', '#contacts']);
   return links;
 }
@@ -92,14 +176,14 @@ function nav(c, { home = false } = {}) {
         <button class="burger" type="button" aria-expanded="false" aria-controls="mobile-menu" aria-label="Открыть меню"><span></span><span></span></button>
       </div>
     </div>
-    <div class="mobile-menu" id="mobile-menu" hidden>
+  </header>
+  <div class="mobile-menu" id="mobile-menu" hidden>
       <nav class="mobile-menu__links" aria-label="Мобильная навигация">
         ${links.map(([, label, href], i) => `<a href="${href}"><span>${String(i + 1).padStart(2, '0')}</span>${label}</a>`).join('')}
       </nav>
       <a class="btn btn--primary btn--block" href="${order}"><span>${esc(c.nav.ctaLabel)}</span>${ARROW}</a>
       <p class="mobile-menu__meta">${esc([c.contacts.email, c.contacts.responseNote].filter(Boolean).join(' · '))}</p>
-    </div>
-  </header>`;
+  </div>`;
 }
 
 function socials(c) {
@@ -139,4 +223,4 @@ function footer(c, { home = false } = {}) {
   </footer>`;
 }
 
-module.exports = { esc, safeUrl, absUrl, head, nav, footer, logo, ARROW, ARROW_DOWN, LINK_ARROW, SOCIAL_ICONS };
+module.exports = { esc, safeUrl, absUrl, head, nav, footer, logo, bodyOpen, bodyClose, ARROW, ARROW_DOWN, LINK_ARROW, SOCIAL_ICONS };

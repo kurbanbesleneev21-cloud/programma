@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const config = require('../config');
 const { icon } = require('./icons');
-const { esc, safeUrl, head, nav, footer, ARROW, ARROW_DOWN, LINK_ARROW } = require('./partials');
+const { esc, safeUrl, head, bodyOpen, bodyClose, ARROW, ARROW_DOWN, LINK_ARROW } = require('./partials');
 const { SERVICES } = require('../constants');
 
 const read = (f) => fs.readFileSync(path.join(__dirname, f), 'utf8');
@@ -56,12 +56,7 @@ function renderHome(c, { origin }) {
     },
   }));
 
-  out.push(`
-<body>
-  <a class="skip-link" href="#main">Перейти к содержимому</a>
-  <canvas class="bg-particles" aria-hidden="true"></canvas>
-  <div class="cursor" aria-hidden="true"><span class="cursor__dot"></span><span class="cursor__ring"></span></div>
-${nav(c, { home: true })}
+  out.push(`${bodyOpen(c, { home: true })}
   <main id="main">
     <section class="hero" id="top" aria-labelledby="hero-title">
       <div class="hero__media" aria-hidden="true"${videoAttrs}>
@@ -82,14 +77,25 @@ ${P.scene}
       ${h.scrollHint ? `<a class="scroll-hint" href="${c.services.enabled ? '#services' : '#order'}" aria-label="Прокрутить вниз"><span>${esc(h.scrollHint)}</span><span class="scroll-hint__line" aria-hidden="true"></span><span aria-hidden="true">↓</span></a>` : ''}
     </section>`);
 
-  if (c.services.enabled) {
-    const s = c.services;
+  if (c.marquee.enabled && c.marquee.items.length) {
+    const row = c.marquee.items.map((t) => `<span>${esc(t)}</span><i aria-hidden="true">✦</i>`).join('');
     out.push(`
+    <div class="marquee" aria-label="Технологии">
+      <div class="marquee__track"><div class="marquee__row">${row}</div><div class="marquee__row" aria-hidden="true">${row}</div></div>
+    </div>`);
+  }
+
+  const blocks = {};
+
+  blocks.services = () => {
+    if (!c.services.enabled) return '';
+    const s = c.services;
+    return (`
     <section class="section" id="services" aria-labelledby="services-title">
       <div class="container">${sectionHead(num(), s.eyebrow, s.title, s.subtitle, 'services-title')}
         <div class="services-grid">
           ${s.items.map((it, i) => `
-          <article class="service-card" data-reveal data-spotlight>
+          <article class="service-card" data-reveal data-spotlight data-tilt-card>
             <div class="service-card__icon" aria-hidden="true">${icon(it.icon)}</div>
             <span class="service-card__index">${String(i + 1).padStart(2, '0')}</span>
             <h3 class="service-card__title">${esc(it.title)}</h3>
@@ -100,11 +106,12 @@ ${P.scene}
         </div>
       </div>
     </section>`);
-  }
+  };
 
-  if (c.about.enabled) {
+  blocks.about = () => {
+    if (!c.about.enabled) return '';
     const a = c.about;
-    out.push(`
+    return (`
     <section class="section section--alt" id="about" aria-labelledby="about-title">
       <div class="container about">
         <div class="about__text" data-reveal>
@@ -121,11 +128,12 @@ ${P.scene}
         </div>` : ''}
       </div>
     </section>`);
-  }
+  };
 
-  if (c.process.enabled && c.process.steps.length) {
+  blocks.process = () => {
+    if (!(c.process.enabled && c.process.steps.length)) return '';
     const pr = c.process;
-    out.push(`
+    return (`
     <section class="section" id="process" aria-labelledby="process-title">
       <div class="container">${sectionHead(num(), pr.eyebrow, pr.title, pr.subtitle, 'process-title')}
         <ol class="timeline" data-timeline style="--steps:${pr.steps.length}">
@@ -139,22 +147,25 @@ ${P.scene}
         </ol>
       </div>
     </section>`);
-  }
+  };
 
+  blocks.order = () => {
   const o = c.order;
   const orderBody = o.acceptingOrders
     ? P.order.replaceAll('{{MAX_FILES}}', String(config.uploads.maxFiles)).replaceAll('{{MAX_MB}}', String(Math.round(config.uploads.maxTotal / 1048576)))
     : `<div class="order glass order--closed" data-reveal><p class="section-subtitle">${esc(o.closedMessage)}</p>${c.contacts.email ? `<a class="btn btn--primary" href="mailto:${esc(c.contacts.email)}"><span>${esc(c.contacts.email)}</span>${ARROW}</a>` : ''}</div>
       </div>`;
-  out.push(`
+  return (`
     <section class="section section--order" id="order" aria-labelledby="order-title" data-contact-email="${esc(c.contacts.email)}" data-max-files="${config.uploads.maxFiles}" data-max-size="${config.uploads.maxFileSize}" data-max-total="${config.uploads.maxTotal}">
       <div class="container">${sectionHead(num(), o.eyebrow, o.title, o.subtitle, 'order-title', ' section-head--center')}
 ${orderBody}
     </section>`);
+  };
 
-  if (c.projects.enabled && projects.length) {
+  blocks.projects = () => {
+    if (!(c.projects.enabled && projects.length)) return '';
     const pj = c.projects;
-    out.push(`
+    return (`
     <section class="section section--alt" id="projects" aria-labelledby="projects-title">
       <div class="container">
         <header class="section-head section-head--split" data-reveal>
@@ -167,16 +178,17 @@ ${orderBody}
         <div class="projects-grid">${projects.map(projectCard).join('')}</div>
       </div>
     </section>`);
-  }
+  };
 
-  if (c.advantages.enabled && c.advantages.items.length) {
+  blocks.advantages = () => {
+    if (!(c.advantages.enabled && c.advantages.items.length)) return '';
     const ad = c.advantages;
-    out.push(`
+    return (`
     <section class="section" id="advantages" aria-labelledby="adv-title">
       <div class="container">${sectionHead(num(), ad.eyebrow, ad.title, '', 'adv-title')}
         <div class="adv-grid">
           ${ad.items.map((it, i) => `
-          <article class="adv-card" data-reveal data-spotlight>
+          <article class="adv-card" data-reveal data-spotlight data-tilt-card>
             <span class="adv-card__num">${String(i + 1).padStart(2, '0')}</span>
             ${icon(it.icon, 'adv-card__icon')}
             <h3 class="adv-card__title">${esc(it.title)}</h3>
@@ -185,11 +197,12 @@ ${orderBody}
         </div>
       </div>
     </section>`);
-  }
+  };
 
-  if (c.faq.enabled && c.faq.items.length) {
+  blocks.faq = () => {
+    if (!(c.faq.enabled && c.faq.items.length)) return '';
     const f = c.faq;
-    out.push(`
+    return (`
     <section class="section section--alt" id="faq" aria-labelledby="faq-title">
       <div class="container faq">${sectionHead(num(), f.eyebrow, f.title, f.subtitle, 'faq-title')}
         <div class="accordion" data-accordion data-reveal>
@@ -201,10 +214,11 @@ ${orderBody}
         </div>
       </div>
     </section>`);
-  }
+  };
 
-  if (c.cta.enabled) {
-    out.push(`
+  blocks.cta = () => {
+    if (!c.cta.enabled) return '';
+    return (`
     <section class="cta" aria-labelledby="cta-title">
       <div class="cta__lines" aria-hidden="true"><span></span><span></span><span></span></div>
       <div class="container cta__inner" data-reveal>
@@ -213,21 +227,66 @@ ${orderBody}
         <a class="btn btn--primary btn--lg btn--glow" href="#order" data-order-link><span>${esc(c.cta.button)}</span>${ARROW}</a>
       </div>
     </section>`);
-  }
+  };
+
+  blocks.pricing = () => {
+    const pr = c.pricing;
+    if (!(pr.enabled && pr.items.length)) return '';
+    return `
+    <section class="section" id="pricing" aria-labelledby="pricing-title">
+      <div class="container">${sectionHead(num(), pr.eyebrow, pr.title, pr.subtitle, 'pricing-title', ' section-head--center')}
+        <div class="price-grid">
+          ${pr.items.map((it) => `
+          <article class="price-card${it.highlighted ? ' price-card--hl' : ''}" data-reveal data-spotlight data-tilt-card>
+            ${it.highlighted ? '<span class="price-card__badge">Популярный выбор</span>' : ''}
+            <h3 class="price-card__name">${esc(it.name)}</h3>
+            <p class="price-card__price">${esc(it.price)}</p>
+            ${it.period ? `<p class="price-card__period">${esc(it.period)}</p>` : ''}
+            ${it.features.filter(Boolean).length ? `<ul class="price-card__list">${it.features.filter(Boolean).map((f) => `<li>${esc(f)}</li>`).join('')}</ul>` : ''}
+            ${it.button ? `<button class="btn ${it.highlighted ? 'btn--primary' : 'btn--ghost'} btn--block" type="button" data-pick-service="${esc(SERVICES[it.service] ? it.service : 'other')}"><span>${esc(it.button)}</span>${ARROW}</button>` : ''}
+          </article>`).join('')}
+        </div>
+      </div>
+    </section>`;
+  };
+
+  blocks.testimonials = () => {
+    const t = c.testimonials;
+    if (!(t.enabled && t.items.length)) return '';
+    return `
+    <section class="section section--alt" id="testimonials" aria-labelledby="testimonials-title">
+      <div class="container">${sectionHead(num(), t.eyebrow, t.title, '', 'testimonials-title')}
+        <div class="reviews">
+          ${t.items.map((it) => {
+            const av = safeUrl(it.avatar, { allowMailTel: false });
+            const initials = esc(String(it.name || '?').trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase());
+            return `
+          <figure class="review" data-reveal data-spotlight>
+            ${it.rating ? `<div class="review__stars" aria-label="Оценка ${it.rating} из 5">${'★'.repeat(it.rating)}<span>${'★'.repeat(5 - it.rating)}</span></div>` : ''}
+            <blockquote class="review__text">${esc(it.text)}</blockquote>
+            <figcaption class="review__author">
+              <span class="review__avatar">${av ? `<img src="${esc(av)}" alt="" width="48" height="48" loading="lazy">` : initials}</span>
+              <span><b>${esc(it.name)}</b>${it.role ? `<small>${esc(it.role)}</small>` : ''}</span>
+            </figcaption>
+          </figure>`;
+          }).join('')}
+        </div>
+      </div>
+    </section>`;
+  };
+
+  for (const id of c.layout.order) if (blocks[id]) out.push(blocks[id]());
 
   out.push(`
   </main>
-${footer(c, { home: true })}
-  <div class="toast" data-toast role="status" aria-live="polite" hidden></div>
-</body>
-</html>`);
+${bodyClose(c, { home: true })}`);
   return out.join('\n');
 }
 
 function projectCard(p) {
   const img = safeUrl(p.preview, { allowMailTel: false });
   return `
-          <article class="project-card" data-reveal>
+          <article class="project-card" data-reveal data-tilt-card>
             <a class="project-card__media" href="/projects/${esc(p.slug)}" tabindex="-1" aria-hidden="true">
               ${img ? `<img src="${esc(img)}" alt="" width="800" height="560" loading="lazy" decoding="async">` : ''}
               ${p.isDemo ? '<span class="badge">Демо-концепт</span>' : ''}
