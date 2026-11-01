@@ -141,7 +141,7 @@ function siteCookie(existing, site) {
 
 const publicSite = (s) => ({
   id: s.id, slug: s.slug, status: s.status, template: s.template, data: s.data,
-  owner_name: s.owner_name, owner_email: s.owner_email, owner_phone: s.owner_phone,
+  owner_name: s.owner_name, owner_email: s.owner_email, owner_phone: s.owner_phone, order_number: s.order_number || '',
   paid_at: s.paid_at, created_at: s.created_at, updated_at: s.updated_at,
 });
 

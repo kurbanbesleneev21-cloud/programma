@@ -430,6 +430,43 @@
     success.focus({ preventScroll: true });
     root.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
     if (!reduceMotion) burst();
+    showAutoSite(data.site);
+  }
+
+  /* ---------- The site the system builds from the order ---------- */
+  const autosite = success.querySelector('[data-autosite]');
+  function siteReady(site) {
+    autosite.innerHTML = `
+      <div class="autosite__icon" aria-hidden="true">✦</div>
+      <h4>Ваш сайт готов!</h4>
+      <p>${site.status === 'active' ? 'Сайт уже опубликован.' : 'Это черновик-предпросмотр. Менеджер доработает его с вами и опубликует после оплаты.'}</p>
+      <a class="btn btn--primary" href="${escapeHtml(site.url)}" target="_blank" rel="noopener"><span>Открыть мой сайт</span></a>
+      <div class="autosite__key">
+        <b>Ссылка, чтобы самому менять тексты и фото — сохраните её:</b>
+        <div class="autosite__row"><input class="input" readonly value="${escapeHtml(site.editUrl)}"><button type="button" class="btn btn--ghost btn--sm" data-copy-edit><span>Копировать</span></button></div>
+      </div>`;
+    autosite.querySelector('[data-copy-edit]').addEventListener('click', async () => {
+      try { await navigator.clipboard.writeText(site.editUrl); CF.toast && CF.toast('Ссылка скопирована'); }
+      catch { autosite.querySelector('input').select(); }
+    });
+  }
+  async function showAutoSite(site) {
+    if (!site) { autosite.hidden = true; return; }
+    autosite.hidden = false;
+    if (!site.ai) { siteReady(site); return; }
+    autosite.innerHTML = `
+      <div class="autosite__loader" aria-hidden="true"><i></i><i></i><i></i></div>
+      <h4>Создаём ваш сайт…</h4>
+      <p data-autosite-step>Читаем ваше описание</p>`;
+    const stepsTxt = ['Читаем ваше описание', 'Подбираем шаблон и цвета', 'Пишем тексты', 'Собираем услуги и цены', 'Почти готово…'];
+    let k = 0;
+    const timer = setInterval(() => { k = Math.min(k + 1, stepsTxt.length - 1); const el = autosite.querySelector('[data-autosite-step]'); if (el) el.textContent = stepsTxt[k]; }, 3500);
+    try {
+      const res = await fetch(`/api/sites/${encodeURIComponent(site.slug)}/generate`, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      if (!res.ok) throw new Error();
+    } catch { /* the instant draft is still there — show it anyway */ }
+    clearInterval(timer);
+    siteReady(site);
   }
 
   function burst() {
@@ -461,6 +498,7 @@
     $$('[aria-invalid]', form).forEach((e) => e.removeAttribute('aria-invalid'));
     touched.clear();
     success.hidden = true;
+    autosite.hidden = true; autosite.innerHTML = '';
     form.hidden = false;
     $('.stepper').hidden = false;
     $('.order__progress').hidden = false;

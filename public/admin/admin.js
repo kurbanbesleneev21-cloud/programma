@@ -241,6 +241,11 @@
               ${o.contact_method === 'whatsapp' || phoneHref ? `<a class="btn btn--ghost btn--sm" href="https://wa.me/${esc(phoneHref.replace(/\D/g, ''))}" target="_blank" rel="noopener"><span>WhatsApp</span></a>` : ''}
             </div>
           </section>
+          ${o.site ? `<section class="panel-card">
+            <h2>Сайт клиента</h2>
+            <p>Система собрала сайт по этой заявке: <b>${esc(o.site.title)}</b></p>
+            <div class="contact-actions"><a class="btn btn--primary btn--sm" href="/s/${esc(o.site.slug)}" target="_blank" rel="noopener"><span>Открыть сайт ↗</span></a><a class="btn btn--ghost btn--sm" href="#/sites"><span>Управлять</span></a></div>
+          </section>` : ''}
           <section class="panel-card">
             <h2>Заметка менеджера</h2>
             <label class="sr-only" for="d-note">Заметка</label>

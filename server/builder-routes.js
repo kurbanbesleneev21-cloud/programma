@@ -9,6 +9,8 @@ const { renderBuilder } = require('./views/builder');
 const { mediaUpload, persistMedia, UploadError } = require('./uploads');
 const telegram = require('./telegram');
 const config = require('./config');
+const aiSite = require('./ai-site');
+const { getSettings, updateSettings, aiKey, publicView } = require('./settings');
 
 const escHtml = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const HOUR = 60 * 60 * 1000;
@@ -192,7 +194,45 @@ function mountBuilder(app, api, d) {
     res.json({ ok: true, site: sites.publicSite(updated) });
   }));
 
+  /* ---------- Claude: fill a site from its order ---------- */
+  async function generateFor(store, site) {
+    if (!site.order_number) throw new HttpError(400, 'Этот сайт создан не из заявки');
+    const key = aiKey(await getSettings(store));
+    if (!key) throw new HttpError(400, 'ИИ-генерация не настроена: добавьте ключ Claude API в админке → Интеграции');
+    const order = await store.getOrderByNumber(site.order_number);
+    if (!order) throw new HttpError(404, 'Заявка для этого сайта не найдена');
+    let gen;
+    try { gen = await aiSite.generateWithClaude(order, key); } catch (err) {
+      console.error('[ai-site]', err.status || '', err.message);
+      throw new HttpError(502, aiSite.friendlyError(err));
+    }
+    const { template, data } = aiSite.applyGenerated(site, gen);
+    return store.updateSite(site.id, { template, data });
+  }
+
+  app.post('/api/sites/:slug/generate', json, wrap(async (req, res) => {
+    const { store, site } = await ownSite(req);
+    if ((await store.countEvents('ai_gen', String(site.id), 24 * HOUR)) >= 3) {
+      throw new HttpError(429, 'Сайт уже генерировался несколько раз сегодня. Отредактируйте его вручную или попробуйте завтра.');
+    }
+    await store.addEvent('ai_gen', String(site.id));
+    const updated = await generateFor(store, site);
+    res.json({ ok: true, site: sites.publicSite(updated) });
+  }));
+
   /* ---------- Admin ---------- */
+  api.post('/sites/:id/generate', requireAdmin, wrap(async (req, res) => {
+    const site = await adminSite(req);
+    res.json({ ok: true, site: sites.publicSite(await generateFor(req.store, site)) });
+  }));
+
+  api.post('/ai', requireAdmin, wrap(async (req, res) => {
+    const apiKey = String((req.body || {}).apiKey || '').trim();
+    if (apiKey && !/^sk-ant-[\w-]{20,}$/.test(apiKey)) throw new HttpError(422, 'Ключ Claude API начинается с sk-ant-');
+    await updateSettings(req.store, (st) => { st.ai.apiKey = apiKey; });
+    res.json(publicView(await getSettings(req.store), { origin: originOf(req) }));
+  }));
+
   api.get('/sites', requireAdmin, wrap(async (req, res) => {
     const list = await req.store.listSites();
     res.json({ items: list.map(sites.publicSite), statuses: sites.STATUSES, templates: Object.fromEntries(Object.entries(sites.TEMPLATES).map(([k, t]) => [k, t.name])) });

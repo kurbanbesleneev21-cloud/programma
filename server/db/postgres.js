@@ -94,6 +94,7 @@ CREATE TABLE IF NOT EXISTS sites (
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_sites_created ON sites(created_at);
+ALTER TABLE sites ADD COLUMN IF NOT EXISTS order_number TEXT NOT NULL DEFAULT '';
 CREATE TABLE IF NOT EXISTS counters (
   key TEXT PRIMARY KEY,
   n   BIGINT NOT NULL DEFAULT 0
@@ -344,13 +345,15 @@ async function createPostgresStore(connectionString) {
 
     async createSite(site) {
       const { rows } = await pool.query(
-        'INSERT INTO sites (slug, status, template, data, owner_name, owner_email, owner_phone, token_hash, ip_hash) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *',
-        [site.slug, site.status, site.template, JSON.stringify(site.data), site.owner_name, site.owner_email, site.owner_phone, site.token_hash, site.ip_hash || '']
+        'INSERT INTO sites (slug, status, template, data, owner_name, owner_email, owner_phone, token_hash, ip_hash, order_number) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *',
+        [site.slug, site.status, site.template, JSON.stringify(site.data), site.owner_name, site.owner_email, site.owner_phone, site.token_hash, site.ip_hash || '', site.order_number || '']
       );
       return siteRow(rows[0]);
     },
     async getSite(id) { return siteRow((await pool.query('SELECT * FROM sites WHERE id = $1', [id])).rows[0]); },
     async getSiteBySlug(slug) { return siteRow((await pool.query('SELECT * FROM sites WHERE slug = $1', [slug])).rows[0]); },
+    async getSiteByOrder(number) { return number ? siteRow((await pool.query('SELECT * FROM sites WHERE order_number = $1 ORDER BY id DESC LIMIT 1', [number])).rows[0]) : null; },
+    async getOrderByNumber(number) { const r = (await pool.query('SELECT id FROM orders WHERE number = $1', [number])).rows[0]; return r ? this.getOrder(Number(r.id)) : null; },
     async listSites({ limit = 200 } = {}) { return (await pool.query('SELECT * FROM sites ORDER BY id DESC LIMIT $1', [limit])).rows.map(siteRow); },
     async updateSite(id, patch) {
       const cols = ['status', 'template', 'data', 'owner_name', 'owner_email', 'owner_phone', 'token_hash', 'paid_at'].filter((k) => k in patch);
