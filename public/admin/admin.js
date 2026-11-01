@@ -284,7 +284,7 @@
   function route() {
     const h = location.hash || '#/orders';
     const m = h.match(/^#\/orders\/(\d+)/);
-    const cms = /^#\/(content|projects|media|settings|integrations|sites)/.test(h);
+    const cms = /^#\/(content|projects|media|settings|integrations|sites|clients)/.test(h);
     $('[data-page="list"]').hidden = !!m || cms;
     $('[data-page="detail"]').hidden = !m;
     $('[data-page="cms"]').hidden = !cms;

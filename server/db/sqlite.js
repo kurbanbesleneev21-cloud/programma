@@ -92,6 +92,14 @@ CREATE TABLE IF NOT EXISTS sites (
   updated_at  TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_sites_created ON sites(created_at);
+CREATE TABLE IF NOT EXISTS clients (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  email      TEXT NOT NULL UNIQUE,
+  name       TEXT NOT NULL DEFAULT '',
+  picture    TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  last_login TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS counters (
   key TEXT PRIMARY KEY,
   n   INTEGER NOT NULL DEFAULT 0
@@ -254,6 +262,20 @@ function createSqliteStore(dataDir) {
       return this.getSite(id);
     },
     async deleteSite(id) { return db.prepare('DELETE FROM sites WHERE id = ?').run(id).changes > 0; },
+
+    /* ---- client accounts (Google sign-in) ---- */
+    async upsertClient({ email, name, picture }) {
+      const now = new Date().toISOString();
+      db.prepare('INSERT INTO clients (email, name, picture, created_at, last_login) VALUES (?, ?, ?, ?, ?) ON CONFLICT(email) DO UPDATE SET name = excluded.name, picture = excluded.picture, last_login = excluded.last_login')
+        .run(email, name || '', picture || '', now, now);
+      return { ...db.prepare('SELECT * FROM clients WHERE email = ?').get(email) };
+    },
+    async listClients() { return db.prepare('SELECT * FROM clients ORDER BY last_login DESC LIMIT 500').all().map((r) => ({ ...r })); },
+    async ordersByEmail(email) {
+      return db.prepare('SELECT id, number, status, project_name, services, created_at FROM orders WHERE lower(email) = ? ORDER BY id DESC LIMIT 100').all(email)
+        .map((r) => ({ ...r, services: JSON.parse(r.services) }));
+    },
+    async sitesByEmail(email) { return db.prepare('SELECT * FROM sites WHERE lower(owner_email) = ? ORDER BY id DESC LIMIT 100').all(email).map(siteRow); },
 
     /* ---- counters (page views per day) ---- */
     async bumpCounter(key, by = 1) {

@@ -141,7 +141,11 @@ test('google sign-in: settings validation, login button, state check', async () 
   assert.equal((await (await fetch(`${base}/api/admin/auth-options`)).json()).google, false);
   assert.equal((await json('/api/admin/google', 'POST', { clientId: 'bad', allowedEmails: 'me@gmail.com' })).status, 422);
   assert.equal((await json('/api/admin/google', 'POST', { clientId: 'x.apps.googleusercontent.com', clientSecret: 's', allowedEmails: 'not-an-email' })).status, 422);
-  assert.equal((await json('/api/admin/google', 'POST', { clientId: 'x.apps.googleusercontent.com', clientSecret: 's', allowedEmails: '' })).status, 422, 'at least one Gmail is required');
+  // keys without an admin e-mail: fine for client accounts, admin sign-in explains what's missing
+  assert.equal((await json('/api/admin/google', 'POST', { clientId: 'x.apps.googleusercontent.com', clientSecret: 's', allowedEmails: '' })).status, 200);
+  const needMail = await fetch(`${base}/api/admin/google/start`, { redirect: 'manual' });
+  assert.match(decodeURIComponent(needMail.headers.get('location')), /добавьте ваш Gmail/);
+  await json('/api/admin/google', 'POST', { clientId: '', allowedEmails: '' });
   const nogo = await fetch(`${base}/api/admin/google/start`, { redirect: 'manual' });
   assert.equal(nogo.status, 302);
   assert.match(decodeURIComponent(nogo.headers.get('location')), /\/admin\/\?error=Вход через Google не настроен/);

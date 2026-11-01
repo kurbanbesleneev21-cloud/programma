@@ -95,6 +95,14 @@ CREATE TABLE IF NOT EXISTS sites (
 );
 CREATE INDEX IF NOT EXISTS idx_sites_created ON sites(created_at);
 ALTER TABLE sites ADD COLUMN IF NOT EXISTS order_number TEXT NOT NULL DEFAULT '';
+CREATE TABLE IF NOT EXISTS clients (
+  id         BIGSERIAL PRIMARY KEY,
+  email      TEXT NOT NULL UNIQUE,
+  name       TEXT NOT NULL DEFAULT '',
+  picture    TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_login TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 CREATE TABLE IF NOT EXISTS counters (
   key TEXT PRIMARY KEY,
   n   BIGINT NOT NULL DEFAULT 0
@@ -364,6 +372,24 @@ async function createPostgresStore(connectionString) {
       return this.getSite(id);
     },
     async deleteSite(id) { return (await pool.query('DELETE FROM sites WHERE id = $1', [id])).rowCount > 0; },
+
+    async upsertClient({ email, name, picture }) {
+      const { rows } = await pool.query(
+        'INSERT INTO clients (email, name, picture) VALUES ($1, $2, $3) ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name, picture = EXCLUDED.picture, last_login = now() RETURNING *',
+        [email, name || '', picture || '']
+      );
+      const r = rows[0];
+      return { ...r, id: Number(r.id), created_at: iso(r.created_at), last_login: iso(r.last_login) };
+    },
+    async listClients() {
+      const { rows } = await pool.query('SELECT * FROM clients ORDER BY last_login DESC LIMIT 500');
+      return rows.map((r) => ({ ...r, id: Number(r.id), created_at: iso(r.created_at), last_login: iso(r.last_login) }));
+    },
+    async ordersByEmail(email) {
+      const { rows } = await pool.query('SELECT id, number, status, project_name, services, created_at FROM orders WHERE lower(email) = $1 ORDER BY id DESC LIMIT 100', [email]);
+      return rows.map((r) => ({ ...r, id: Number(r.id), created_at: iso(r.created_at) }));
+    },
+    async sitesByEmail(email) { return (await pool.query('SELECT * FROM sites WHERE lower(owner_email) = $1 ORDER BY id DESC LIMIT 100', [email])).rows.map(siteRow); },
 
     async bumpCounter(key, by = 1) {
       await pool.query('INSERT INTO counters (key, n) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET n = counters.n + EXCLUDED.n', [key, by]);
