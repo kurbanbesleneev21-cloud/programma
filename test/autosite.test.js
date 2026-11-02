@@ -23,7 +23,7 @@ Object.assign(process.env, {
 delete process.env.ANTHROPIC_API_KEY;
 delete process.env.GEMINI_API_KEY;
 const geminiCalls = [];
-let geminiReply = null, geminiStatus = 200;
+let geminiReply = null, geminiStatus = 200, rejectThinking = false;
 
 const realFetch = globalThis.fetch;
 const claudeCalls = [];
@@ -41,6 +41,8 @@ globalThis.fetch = async (url, opts = {}) => {
   }
   if (u.startsWith('https://generativelanguage.googleapis.com/')) {
     geminiCalls.push({ url: u, body: JSON.parse(opts.body), key: new Headers(opts.headers).get('x-goog-api-key') });
+    const sent = geminiCalls[geminiCalls.length - 1].body;
+    if (rejectThinking && sent.generationConfig.thinkingConfig) return new Response(JSON.stringify({ error: { code: 400, message: 'Invalid JSON payload received. Unknown name "thinkingLevel"' } }), { status: 400, headers: { 'Content-Type': 'application/json' } });
     if (/models\/gemini-1\.5-flash:/.test(u)) return new Response(JSON.stringify({ error: { code: 404, message: 'models/gemini-1.5-flash is not found' } }), { status: 404, headers: { 'Content-Type': 'application/json' } });
     if (geminiStatus !== 200) return new Response(JSON.stringify({ error: { code: geminiStatus, message: 'quota exceeded' } }), { status: geminiStatus, headers: { 'Content-Type': 'application/json' } });
     return new Response(JSON.stringify({ candidates: [{ content: { role: 'model', parts: [{ text: JSON.stringify(geminiReply) }] }, finishReason: 'STOP' }] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
@@ -205,6 +207,16 @@ test('free Gemini writes the site when its key is set (preferred over Claude)', 
   const listed = await (await admin('/ai/gemini-models', 'POST', {})).json();
   assert.deepEqual(listed.models.map((m) => m.id), ['gemini-3.0-flash', 'gemini-3.0-pro', 'gemini-3.5-flash-preview']);
   assert.equal(listed.recommended, 'gemini-3.0-flash');
+  assert.deepEqual(call.body.generationConfig.thinkingConfig, { thinkingLevel: 'low' }, 'slow "thinking" is turned down');
+
+  // a model that rejects the thinking setting gets a retry without it
+  rejectThinking = true;
+  geminiCalls.length = 0;
+  const s2 = (await (await admin('/sites')).json()).items.find((x) => x.slug === data.site.slug);
+  assert.equal((await admin(`/sites/${s2.id}/generate`, 'POST')).status, 200);
+  assert.equal(geminiCalls.length, 2);
+  assert.equal(geminiCalls[1].body.generationConfig.thinkingConfig, undefined);
+  rejectThinking = false;
   assert.equal(call.key, 'AIza-test-not-a-real-key-000000000000');
   assert.equal(call.body.generationConfig.responseMimeType, 'application/json');
   assert.match(call.body.contents[0].parts[0].text, /Йога Студия Лотос/);
