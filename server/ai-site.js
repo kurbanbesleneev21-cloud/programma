@@ -175,7 +175,23 @@ function pickGeminiModel(models) {
   return [...models].sort((a, b) => score(b.id) - score(a.id))[0] || null;
 }
 
-async function callGemini(order, apiKey, model) {
+// Newer Gemini models "think" before answering by default, which can take longer than the
+// serverless time limit. Site copy doesn't need it: switch thinking off / to the minimum.
+function thinkingFor(model) {
+  const v = /gemini-(\d+)/.exec(model);
+  const major = v ? Number(v[1]) : 0;
+  if (major >= 3) return { thinkingLevel: 'low' };
+  if (major === 2 && /flash/.test(model)) return { thinkingBudget: 0 };
+  return null;
+}
+
+const DEADLINE_MS = 50_000; // the whole generation must fit into one Vercel function call (60 s)
+
+async function callGemini(order, apiKey, model, { deadline = Date.now() + DEADLINE_MS, thinking = true } = {}) {
+  const left = deadline - Date.now();
+  if (left < 3000) throw new AiError(`Gemini (${model}) не ответил вовремя`, 0);
+  const thinkingConfig = thinking ? thinkingFor(model) : null;
+  const t0 = Date.now();
   let res;
   try {
     res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
@@ -184,12 +200,21 @@ async function callGemini(order, apiKey, model) {
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: SYSTEM }] },
         contents: [{ role: 'user', parts: [{ text: orderPrompt(order) }] }],
-        generationConfig: { responseMimeType: 'application/json', responseSchema: GEMINI_SCHEMA, temperature: 0.7 },
+        generationConfig: {
+          responseMimeType: 'application/json', responseSchema: GEMINI_SCHEMA, temperature: 0.7, maxOutputTokens: 4096,
+          ...(thinkingConfig ? { thinkingConfig } : {}),
+        },
       }),
-      signal: AbortSignal.timeout(50_000),
+      signal: AbortSignal.timeout(left),
     });
   } catch (err) {
-    throw new AiError(err.name === 'TimeoutError' ? 'Gemini не ответил вовремя' : 'Нет соединения с Gemini', 0);
+    throw new AiError(err.name === 'TimeoutError' ? `Gemini (${model}) не ответил за ${Math.round((Date.now() - t0) / 1000)} сек` : 'Нет соединения с Gemini', 0);
+  }
+  console.log(`[ai-site] gemini ${model} ${res.status} in ${Date.now() - t0} ms`);
+  // A model that doesn't accept this thinking setting: retry once without it.
+  if (res.status === 400 && thinkingConfig) {
+    const body = await res.clone().json().catch(() => ({}));
+    if (/think/i.test((body.error && body.error.message) || '')) return callGemini(order, apiKey, model, { deadline, thinking: false });
   }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
@@ -213,14 +238,15 @@ async function callGemini(order, apiKey, model) {
 // Uses the saved model; if it is empty, "auto" or no longer exists, finds a working one.
 // Returns the content plus the model actually used (so the caller can remember it).
 async function generateWithGemini(order, apiKey, model = 'auto') {
+  const deadline = Date.now() + DEADLINE_MS;
   if (model && model !== 'auto') {
-    try { return { gen: await callGemini(order, apiKey, model), model }; } catch (err) {
+    try { return { gen: await callGemini(order, apiKey, model, { deadline }), model }; } catch (err) {
       if (err.aiStatus !== 404) throw err;
     }
   }
   const picked = pickGeminiModel(await listGeminiModels(apiKey));
   if (!picked) throw new AiError('Для этого ключа Google не дал ни одной текстовой модели Gemini', 404);
-  return { gen: await callGemini(order, apiKey, picked.id), model: picked.id };
+  return { gen: await callGemini(order, apiKey, picked.id, { deadline }), model: picked.id };
 }
 
 // Generates with whichever AI is configured: { provider: 'gemini'|'claude', key, model? }.
