@@ -23,7 +23,7 @@ Object.assign(process.env, {
 delete process.env.ANTHROPIC_API_KEY;
 delete process.env.GEMINI_API_KEY;
 const geminiCalls = [];
-let geminiReply = null, geminiStatus = 200, rejectThinking = false;
+let geminiReply = null, geminiStatus = 200, rejectThinking = false, busyModels = new Set();
 
 const realFetch = globalThis.fetch;
 const claudeCalls = [];
@@ -43,6 +43,8 @@ globalThis.fetch = async (url, opts = {}) => {
     geminiCalls.push({ url: u, body: JSON.parse(opts.body), key: new Headers(opts.headers).get('x-goog-api-key') });
     const sent = geminiCalls[geminiCalls.length - 1].body;
     if (rejectThinking && sent.generationConfig.thinkingConfig) return new Response(JSON.stringify({ error: { code: 400, message: 'Invalid JSON payload received. Unknown name "thinkingLevel"' } }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+    const mm = /models\/([^:]+):/.exec(u);
+    if (mm && busyModels.has(mm[1])) return new Response(JSON.stringify({ error: { code: 503, message: 'This model is currently experiencing high demand.' } }), { status: 503, headers: { 'Content-Type': 'application/json' } });
     if (/models\/gemini-1\.5-flash:/.test(u)) return new Response(JSON.stringify({ error: { code: 404, message: 'models/gemini-1.5-flash is not found' } }), { status: 404, headers: { 'Content-Type': 'application/json' } });
     if (geminiStatus !== 200) return new Response(JSON.stringify({ error: { code: geminiStatus, message: 'quota exceeded' } }), { status: geminiStatus, headers: { 'Content-Type': 'application/json' } });
     return new Response(JSON.stringify({ candidates: [{ content: { role: 'model', parts: [{ text: JSON.stringify(geminiReply) }] }, finishReason: 'STOP' }] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
@@ -225,11 +227,21 @@ test('free Gemini writes the site when its key is set (preferred over Claude)', 
   assert.match(html, /--accent:#16a34a/);
 
   // quota errors are explained; malformed output is rejected
-  geminiStatus = 429;
+  // overloaded model: the others are tried; if all are busy, a readable message
   const site = (await (await admin('/sites')).json()).items.find((x) => x.slug === data.site.slug);
+  busyModels = new Set(['gemini-3.0-flash']);
+  geminiCalls.length = 0;
+  geminiReply = { template: 'business', title: 'Студия йоги «Лотос»', tagline: 'Йога', about: 'А.', cta: 'Записаться', items: [], theme: 'light', accent: '#16a34a' };
+  assert.equal((await admin(`/sites/${site.id}/generate`, 'POST')).status, 200);
+  assert.deepEqual(geminiCalls.map((c) => c.url.match(/models\/([^:]+)/)[1]), ['gemini-3.0-flash', 'gemini-3.0-pro'], 'falls over to the next model');
+  assert.equal((await (await admin('/integrations')).json()).ai.geminiModel, 'gemini-3.0-flash', 'a temporary overload does not change the saved model');
+  busyModels = new Set(['gemini-3.0-flash', 'gemini-3.0-pro', 'gemini-3.5-flash-preview']);
   const q = await admin(`/sites/${site.id}/generate`, 'POST');
   assert.equal(q.status, 502);
-  assert.match((await q.json()).error, /лимит Gemini/);
+  assert.match((await q.json()).error, /перегружен/);
+  busyModels = new Set();
+  geminiStatus = 429;
+  assert.match((await (await admin(`/sites/${site.id}/generate`, 'POST')).json()).error, /лимит Gemini/);
   geminiStatus = 200;
   geminiReply = { nope: true };
   assert.match((await (await admin(`/sites/${site.id}/generate`, 'POST')).json()).error, /не по схеме/);

@@ -165,15 +165,16 @@ async function listGeminiModels(apiKey) {
 }
 
 // Best text model for site copy: newest version first; "flash" (generous free tier) over "pro"; stable over preview.
-function pickGeminiModel(models) {
+function rankGeminiModels(models) {
   const ver = (id) => { const m = /gemini-(\d+(?:\.\d+)?)/.exec(id); return m ? Number(m[1]) : 0; };
   const score = (id) => ver(id) * 100
     + (/flash/.test(id) && !/lite/.test(id) ? 30 : /flash-lite/.test(id) ? 15 : /pro/.test(id) ? 5 : 0)
     + (/latest$/.test(id) ? 4 : 0)
     - (/(preview|exp|experimental)/.test(id) ? 10000 : 0) // previews disappear without notice: only if nothing stable
     - (/-\d{3,}$/.test(id) ? 1 : 0);
-  return [...models].sort((a, b) => score(b.id) - score(a.id))[0] || null;
+  return [...models].sort((a, b) => score(b.id) - score(a.id));
 }
+const pickGeminiModel = (models) => rankGeminiModels(models)[0] || null;
 
 // Newer Gemini models "think" before answering by default, which can take longer than the
 // serverless time limit. Site copy doesn't need it: switch thinking off / to the minimum.
@@ -223,6 +224,7 @@ async function callGemini(order, apiKey, model, { deadline = Date.now() + DEADLI
     if (res.status === 403) throw new AiError('Ключ Gemini не имеет доступа (проверьте ключ в Google AI Studio)', 403);
     if (res.status === 404) throw new AiError(`Модель «${model}» не найдена — укажите другую модель Gemini в админке → Интеграции`, 404);
     if (res.status === 429) throw new AiError('Бесплатный лимит Gemini исчерпан — попробуйте позже', 429);
+    if (res.status === 503 || res.status === 500 || res.status === 502 || res.status === 504) throw new AiError('Gemini сейчас перегружен у Google — попробуйте через несколько минут', res.status);
     throw new AiError(`Gemini: ошибка ${res.status}${msg ? ` — ${msg.slice(0, 160)}` : ''}`, res.status);
   }
   const cand = data.candidates && data.candidates[0];
@@ -237,16 +239,37 @@ async function callGemini(order, apiKey, model, { deadline = Date.now() + DEADLI
 
 // Uses the saved model; if it is empty, "auto" or no longer exists, finds a working one.
 // Returns the content plus the model actually used (so the caller can remember it).
+// Statuses where another model may still work: gone (404), per-model quota (429), overloaded (5xx).
+const TRY_ANOTHER = new Set([404, 429, 500, 502, 503, 504]);
+
+// Uses the saved model first; if it is gone, over quota or overloaded, tries the other models
+// this key can use (best first) until one answers or the time runs out.
+// Returns the content plus `model` when the saved one no longer exists (so it gets replaced).
 async function generateWithGemini(order, apiKey, model = 'auto') {
   const deadline = Date.now() + DEADLINE_MS;
-  if (model && model !== 'auto') {
-    try { return { gen: await callGemini(order, apiKey, model, { deadline }), model }; } catch (err) {
-      if (err.aiStatus !== 404) throw err;
+  const saved = model && model !== 'auto' ? model : null;
+  let lastErr = null;
+  let savedGone = false;
+  if (saved) {
+    try { return { gen: await callGemini(order, apiKey, saved, { deadline }) }; } catch (err) {
+      if (!TRY_ANOTHER.has(err.aiStatus)) throw err;
+      lastErr = err;
+      savedGone = err.aiStatus === 404;
     }
   }
-  const picked = pickGeminiModel(await listGeminiModels(apiKey));
-  if (!picked) throw new AiError('Для этого ключа Google не дал ни одной текстовой модели Gemini', 404);
-  return { gen: await callGemini(order, apiKey, picked.id, { deadline }), model: picked.id };
+  const ranked = rankGeminiModels(await listGeminiModels(apiKey)).filter((m) => m.id !== saved);
+  if (!ranked.length) throw lastErr || new AiError('Для этого ключа Google не дал ни одной текстовой модели Gemini', 404);
+  for (const m of ranked.slice(0, 4)) {
+    if (deadline - Date.now() < 5000) break;
+    try {
+      const gen = await callGemini(order, apiKey, m.id, { deadline });
+      return { gen, ...(saved && !savedGone ? {} : { model: m.id }) };
+    } catch (err) {
+      if (!TRY_ANOTHER.has(err.aiStatus)) throw err;
+      lastErr = err;
+    }
+  }
+  throw lastErr;
 }
 
 // Generates with whichever AI is configured: { provider: 'gemini'|'claude', key, model? }.
@@ -281,4 +304,4 @@ function friendlyError(err) {
   return err.message || 'Не удалось сгенерировать сайт';
 }
 
-module.exports = { wantsSite, draftFromOrder, guessTemplate, uniqueSlug, generate, generateWithClaude, generateWithGemini, listGeminiModels, pickGeminiModel, applyGenerated, friendlyError, MODEL };
+module.exports = { wantsSite, draftFromOrder, guessTemplate, uniqueSlug, generate, generateWithClaude, generateWithGemini, listGeminiModels, pickGeminiModel, rankGeminiModels, applyGenerated, friendlyError, MODEL };
