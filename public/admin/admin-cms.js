@@ -831,8 +831,11 @@
                 <div class="cms-inline"><input class="input" name="geminiKey" placeholder="${data.ai.geminiKeyMasked ? `сохранён: ${esc(data.ai.geminiKeyMasked)}` : 'AIza… или AQ.…'}" autocomplete="off" spellcheck="false">
                 <button class="btn btn--primary btn--sm" type="submit"><span class="btn__label">Сохранить</span><span class="btn__spinner" aria-hidden="true"></span></button>
                 ${data.ai.geminiKeyMasked ? '<button class="btn btn--ghost btn--sm" type="button" data-ai-clear="geminiKey"><span>Удалить</span></button>' : ''}</div>
-                <details><summary class="cms-hint">Модель (менять только если Google переименует)</summary>
-                  <div class="cms-inline"><input class="input" name="geminiModel" value="${esc(data.ai.geminiModel)}" spellcheck="false"><button class="btn btn--ghost btn--sm" type="button" data-ai-model><span>Сохранить модель</span></button></div></details>
+                <div class="integ__model">
+                  <span class="cms-hint">Модель: <b data-gm-current>${data.ai.geminiModel === 'auto' ? 'выбирается автоматически' : esc(data.ai.geminiModel)}</b></span>
+                  <button class="btn btn--ghost btn--sm" type="button" data-gm-find ${data.ai.geminiKeyMasked || data.ai.geminiFromEnv ? '' : 'disabled'}><span class="btn__label">Найти доступные модели</span><span class="btn__spinner" aria-hidden="true"></span></button>
+                  <div class="cms-inline" data-gm-pick hidden><select class="input select" data-gm-select></select><button class="btn btn--primary btn--sm" type="button" data-ai-model><span>Сохранить модель</span></button></div>
+                </div>
               </form>
             </div>
             <div class="integ__way" data-ai-pane="claude" ${data.ai.provider === 'claude' ? '' : 'hidden'}>
@@ -908,7 +911,20 @@
       aiSave({ provider: rb.value }, null, rb.value === 'gemini' ? 'Сайты будет писать Gemini' : 'Сайты будет писать Claude');
     }));
     $('[data-ai-gemini]', r).addEventListener('submit', (e) => { e.preventDefault(); const v = e.target.geminiKey.value.trim(); if (v) aiSave({ geminiKey: v, provider: 'gemini' }, e.submitter, 'Ключ Gemini сохранён'); });
-    $('[data-ai-model]', r).addEventListener('click', (e) => aiSave({ geminiModel: $('[data-ai-gemini]', r).geminiModel.value.trim() }, e.currentTarget, 'Модель сохранена'));
+    $('[data-gm-find]', r).addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      btn.classList.add('is-loading');
+      try {
+        const { models, recommended, current } = await A().api('/ai/gemini-models', { method: 'POST', body: {} });
+        if (!models.length) { A().toast('Google не вернул ни одной подходящей модели для этого ключа'); return; }
+        const sel = $('[data-gm-select]', r);
+        sel.innerHTML = `<option value="auto">Автоматически (сейчас: ${esc(recommended || '—')})</option>` + models.map((m) => `<option value="${esc(m.id)}">${esc(m.id)}${m.id === recommended ? ' — рекомендуется' : ''}</option>`).join('');
+        sel.value = models.some((m) => m.id === current) ? current : 'auto';
+        $('[data-gm-pick]', r).hidden = false;
+        A().toast(`Ключ работает. Доступно моделей: ${models.length}`);
+      } catch (err) { A().fail(err); } finally { btn.classList.remove('is-loading'); }
+    });
+    $('[data-ai-model]', r).addEventListener('click', (e) => aiSave({ geminiModel: $('[data-gm-select]', r).value }, e.currentTarget, 'Модель сохранена'));
     $('[data-ai-key]', r).addEventListener('submit', (e) => { e.preventDefault(); const v = e.target.apiKey.value.trim(); if (v) aiSave({ apiKey: v, provider: 'claude' }, e.submitter, 'Ключ Claude сохранён'); });
     r.querySelectorAll('[data-ai-clear]').forEach((b) => b.addEventListener('click', () => { if (confirm('Удалить ключ?')) aiSave({ [b.dataset.aiClear]: '' }, b, 'Ключ удалён'); }));
     $('[data-google]', r).addEventListener('submit', (e) => {
