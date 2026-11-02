@@ -142,7 +142,40 @@ class AiError extends Error {
   constructor(message, status) { super(message); this.aiStatus = status; }
 }
 
-async function generateWithGemini(order, apiKey, model = 'gemini-2.5-flash') {
+/* Google renames Gemini models often; ask the API which ones this key can use. */
+const GEMINI_API = 'https://generativelanguage.googleapis.com/v1beta';
+
+async function listGeminiModels(apiKey) {
+  let res;
+  try {
+    res = await fetch(`${GEMINI_API}/models?pageSize=1000`, { headers: { 'x-goog-api-key': apiKey }, signal: AbortSignal.timeout(15_000) });
+  } catch {
+    throw new AiError('Нет соединения с Gemini', 0);
+  }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const msg = (data.error && data.error.message) || '';
+    if (res.status === 400 || res.status === 401 || res.status === 403) throw new AiError(`Ключ Gemini не принят Google${msg ? `: ${msg.slice(0, 160)}` : ''}`, res.status);
+    throw new AiError(`Gemini: ошибка ${res.status}`, res.status);
+  }
+  return (data.models || [])
+    .filter((m) => Array.isArray(m.supportedGenerationMethods) && m.supportedGenerationMethods.includes('generateContent'))
+    .map((m) => ({ id: String(m.name || '').replace(/^models\//, ''), name: m.displayName || m.name }))
+    .filter((m) => /^gemini/i.test(m.id) && !/(embed|tts|image|vision|live|audio|robotics|learnlm|aqa)/i.test(m.id));
+}
+
+// Best text model for site copy: newest version first; "flash" (generous free tier) over "pro"; stable over preview.
+function pickGeminiModel(models) {
+  const ver = (id) => { const m = /gemini-(\d+(?:\.\d+)?)/.exec(id); return m ? Number(m[1]) : 0; };
+  const score = (id) => ver(id) * 100
+    + (/flash/.test(id) && !/lite/.test(id) ? 30 : /flash-lite/.test(id) ? 15 : /pro/.test(id) ? 5 : 0)
+    + (/latest$/.test(id) ? 4 : 0)
+    - (/(preview|exp|experimental)/.test(id) ? 10000 : 0) // previews disappear without notice: only if nothing stable
+    - (/-\d{3,}$/.test(id) ? 1 : 0);
+  return [...models].sort((a, b) => score(b.id) - score(a.id))[0] || null;
+}
+
+async function callGemini(order, apiKey, model) {
   let res;
   try {
     res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
@@ -177,9 +210,24 @@ async function generateWithGemini(order, apiKey, model = 'gemini-2.5-flash') {
   return checked.data;
 }
 
+// Uses the saved model; if it is empty, "auto" or no longer exists, finds a working one.
+// Returns the content plus the model actually used (so the caller can remember it).
+async function generateWithGemini(order, apiKey, model = 'auto') {
+  if (model && model !== 'auto') {
+    try { return { gen: await callGemini(order, apiKey, model), model }; } catch (err) {
+      if (err.aiStatus !== 404) throw err;
+    }
+  }
+  const picked = pickGeminiModel(await listGeminiModels(apiKey));
+  if (!picked) throw new AiError('Для этого ключа Google не дал ни одной текстовой модели Gemini', 404);
+  return { gen: await callGemini(order, apiKey, picked.id), model: picked.id };
+}
+
 // Generates with whichever AI is configured: { provider: 'gemini'|'claude', key, model? }.
-function generate(order, cfg) {
-  return cfg.provider === 'claude' ? generateWithClaude(order, cfg.key) : generateWithGemini(order, cfg.key, cfg.model);
+// Resolves to { gen, model? } — model is set when Gemini picked a different one than configured.
+async function generate(order, cfg) {
+  if (cfg.provider === 'claude') return { gen: await generateWithClaude(order, cfg.key) };
+  return generateWithGemini(order, cfg.key, cfg.model);
 }
 
 // Merges Claude's content with the contacts and photos the site already has.
@@ -207,4 +255,4 @@ function friendlyError(err) {
   return err.message || 'Не удалось сгенерировать сайт';
 }
 
-module.exports = { wantsSite, draftFromOrder, guessTemplate, uniqueSlug, generate, generateWithClaude, generateWithGemini, applyGenerated, friendlyError, MODEL };
+module.exports = { wantsSite, draftFromOrder, guessTemplate, uniqueSlug, generate, generateWithClaude, generateWithGemini, listGeminiModels, pickGeminiModel, applyGenerated, friendlyError, MODEL };

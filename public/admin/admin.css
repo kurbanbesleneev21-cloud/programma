@@ -362,3 +362,5 @@
 .integ__mini { display: grid; gap: 6px; margin-left: 18px; list-style: decimal; font-size: 14px; color: #cfcfcf; }
 .integ__mini a { text-decoration: underline; }
 .integ__way details summary { cursor: pointer; }
+.integ__model { display: grid; gap: 8px; justify-items: start; }
+.integ__model .select { min-width: 0; max-width: 100%; }

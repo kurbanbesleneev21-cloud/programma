@@ -29,7 +29,7 @@ const DEFAULTS = {
     provider: 'gemini',  // 'gemini' (free tier) | 'claude'
     apiKey: '',          // Claude API key
     geminiKey: '',       // Google AI Studio key
-    geminiModel: 'gemini-2.5-flash',
+    geminiModel: 'auto',      // 'auto' = pick from the models Google lists for this key
   },
 };
 
@@ -51,7 +51,7 @@ function conform(raw) {
     .filter((c) => c && /^-?\d{1,20}$/.test(String(c.id)))
     .map((c) => ({ id: String(c.id), title: String(c.title || '').slice(0, 120), addedAt: String(c.addedAt || '') }));
   if (!['gemini', 'claude'].includes(s.ai.provider)) s.ai.provider = 'gemini';
-  if (!/^[\w.-]{3,80}$/.test(s.ai.geminiModel)) s.ai.geminiModel = 'gemini-2.5-flash';
+  if (!/^[\w.-]{3,80}$/.test(s.ai.geminiModel)) s.ai.geminiModel = 'auto';
   s.google.allowedEmails = s.google.allowedEmails.map((e) => String(e).trim().toLowerCase()).filter((e) => /^[^\s@]+@[^\s@]+$/.test(e));
   return s;
 }
@@ -110,7 +110,7 @@ function publicView(s, { origin } = {}) {
       fromEnv: !s.ai.apiKey && Boolean(process.env.ANTHROPIC_API_KEY),
       geminiKeyMasked: mask(s.ai.geminiKey),
       geminiFromEnv: !s.ai.geminiKey && Boolean(process.env.GEMINI_API_KEY),
-      geminiModel: s.ai.geminiModel || 'gemini-2.5-flash',
+      geminiModel: s.ai.geminiModel || 'auto',
     },
   };
 }
@@ -119,7 +119,7 @@ function publicView(s, { origin } = {}) {
 function aiConfig(s) {
   const claude = s.ai.apiKey || process.env.ANTHROPIC_API_KEY || '';
   const gemini = s.ai.geminiKey || process.env.GEMINI_API_KEY || '';
-  const model = s.ai.geminiModel || 'gemini-2.5-flash';
+  const model = s.ai.geminiModel || 'auto';
   if (s.ai.provider === 'claude') return claude ? { provider: 'claude', key: claude } : gemini ? { provider: 'gemini', key: gemini, model } : null;
   return gemini ? { provider: 'gemini', key: gemini, model } : claude ? { provider: 'claude', key: claude } : null;
 }

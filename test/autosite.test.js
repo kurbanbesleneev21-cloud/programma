@@ -30,8 +30,18 @@ const claudeCalls = [];
 let claudeReply = null;
 globalThis.fetch = async (url, opts = {}) => {
   const u = String(url instanceof Request ? url.url : url);
+  if (u.startsWith('https://generativelanguage.googleapis.com/v1beta/models?')) {
+    return new Response(JSON.stringify({ models: [
+      { name: 'models/gemini-3.0-flash', supportedGenerationMethods: ['generateContent', 'countTokens'] },
+      { name: 'models/gemini-3.0-pro', supportedGenerationMethods: ['generateContent'] },
+      { name: 'models/gemini-3.5-flash-preview', supportedGenerationMethods: ['generateContent'] },
+      { name: 'models/gemini-embedding-002', supportedGenerationMethods: ['embedContent'] },
+      { name: 'models/gemini-3.0-flash-image', supportedGenerationMethods: ['generateContent'] },
+    ] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }
   if (u.startsWith('https://generativelanguage.googleapis.com/')) {
     geminiCalls.push({ url: u, body: JSON.parse(opts.body), key: new Headers(opts.headers).get('x-goog-api-key') });
+    if (/models\/gemini-1\.5-flash:/.test(u)) return new Response(JSON.stringify({ error: { code: 404, message: 'models/gemini-1.5-flash is not found' } }), { status: 404, headers: { 'Content-Type': 'application/json' } });
     if (geminiStatus !== 200) return new Response(JSON.stringify({ error: { code: geminiStatus, message: 'quota exceeded' } }), { status: geminiStatus, headers: { 'Content-Type': 'application/json' } });
     return new Response(JSON.stringify({ candidates: [{ content: { role: 'model', parts: [{ text: JSON.stringify(geminiReply) }] }, finishReason: 'STOP' }] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
   }
@@ -173,7 +183,8 @@ test('with a Claude key the site is written by Claude', async () => {
 test('free Gemini writes the site when its key is set (preferred over Claude)', async () => {
   assert.equal((await admin('/ai', 'POST', { geminiKey: 'short' })).status, 422);
   assert.equal((await admin('/ai', 'POST', { geminiKey: 'AQ.test-not-a-real-key-000000000000' })).status, 200, 'new-style AQ. keys are accepted');
-  const saved = await (await admin('/ai', 'POST', { provider: 'gemini', geminiKey: 'AIza-test-not-a-real-key-000000000000', geminiModel: 'gemini-2.5-flash' })).json();
+  // the user typed an old model name that Google has since removed
+  const saved = await (await admin('/ai', 'POST', { provider: 'gemini', geminiKey: 'AIza-test-not-a-real-key-000000000000', geminiModel: 'gemini-1.5-flash' })).json();
   assert.equal(saved.ai.provider, 'gemini');
   assert.equal(saved.ai.configured, true);
   assert.ok(!JSON.stringify(saved).includes('AIza-test-not-a-real-key-000000000000'));
@@ -187,8 +198,13 @@ test('free Gemini writes the site when its key is set (preferred over Claude)', 
   const gen = await fetch(`${base}/api/sites/${data.site.slug}/generate`, { method: 'POST', headers: { cookie, 'Content-Type': 'application/json' }, body: '{}' });
   assert.equal(gen.status, 200);
   assert.equal(claudeCalls.length, before, 'Claude is not called when Gemini is selected');
-  const call = geminiCalls[0];
-  assert.match(call.url, /models\/gemini-2\.5-flash:generateContent$/);
+  assert.match(geminiCalls[0].url, /models\/gemini-1\.5-flash:generateContent$/, 'tries the saved model first');
+  const call = geminiCalls[1];
+  assert.match(call.url, /models\/gemini-3\.0-flash:generateContent$/, 'falls back to the best model Google lists (stable flash, not preview/image)');
+  assert.equal((await (await admin('/integrations')).json()).ai.geminiModel, 'gemini-3.0-flash', 'the working model is remembered');
+  const listed = await (await admin('/ai/gemini-models', 'POST', {})).json();
+  assert.deepEqual(listed.models.map((m) => m.id), ['gemini-3.0-flash', 'gemini-3.0-pro', 'gemini-3.5-flash-preview']);
+  assert.equal(listed.recommended, 'gemini-3.0-flash');
   assert.equal(call.key, 'AIza-test-not-a-real-key-000000000000');
   assert.equal(call.body.generationConfig.responseMimeType, 'application/json');
   assert.match(call.body.contents[0].parts[0].text, /Йога Студия Лотос/);

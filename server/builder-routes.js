@@ -207,7 +207,12 @@ function mountBuilder(app, api, d) {
     const order = await store.getOrderByNumber(site.order_number);
     if (!order) throw new HttpError(404, 'Заявка для этого сайта не найдена');
     let gen;
-    try { gen = await aiSite.generate(order, cfg); } catch (err) {
+    try {
+      const out = await aiSite.generate(order, cfg);
+      gen = out.gen;
+      // remember the Gemini model that actually worked
+      if (out.model && out.model !== cfg.model) await updateSettings(store, (st) => { st.ai.geminiModel = out.model; }).catch(() => {});
+    } catch (err) {
       console.error('[ai-site]', err.status || '', err.message);
       throw new HttpError(502, aiSite.friendlyError(err));
     }
@@ -231,6 +236,17 @@ function mountBuilder(app, api, d) {
     res.json({ ok: true, site: sites.publicSite(await generateFor(req.store, site)) });
   }));
 
+  // Models this Gemini key can use (Google renames them; the admin picks from the live list).
+  api.post('/ai/gemini-models', requireAdmin, json, wrap(async (req, res) => {
+    const st = await getSettings(req.store);
+    const key = st.ai.geminiKey || process.env.GEMINI_API_KEY || '';
+    if (!key) throw new HttpError(400, 'Сначала сохраните ключ Gemini');
+    let models;
+    try { models = await aiSite.listGeminiModels(key); } catch (err) { throw new HttpError(502, aiSite.friendlyError(err)); }
+    const best = aiSite.pickGeminiModel(models);
+    res.json({ models, recommended: best ? best.id : null, current: st.ai.geminiModel });
+  }));
+
   // Body may carry any of: provider, apiKey (Claude), geminiKey, geminiModel. '' clears a key.
   api.post('/ai', requireAdmin, wrap(async (req, res) => {
     const b = req.body || {};
@@ -245,7 +261,7 @@ function mountBuilder(app, api, d) {
       if (patch.geminiKey && !/^[\w.-]{20,200}$/.test(patch.geminiKey)) throw new HttpError(422, 'Ключ Gemini не похож на настоящий — скопируйте его в Google AI Studio кнопкой «Копировать ключ»');
     }
     if ('geminiModel' in b) {
-      patch.geminiModel = String(b.geminiModel || '').trim() || 'gemini-2.5-flash';
+      patch.geminiModel = String(b.geminiModel || '').trim() || 'auto';
       if (!/^[\w.-]{3,80}$/.test(patch.geminiModel)) throw new HttpError(422, 'Название модели: латиница, цифры, точки и дефисы');
     }
     if ('provider' in b) {
